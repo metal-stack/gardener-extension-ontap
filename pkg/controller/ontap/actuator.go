@@ -24,6 +24,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	ontap "github.com/metal-stack/ontap-go/pkg/client"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -47,6 +49,9 @@ const (
 
 // NewActuator returns an actuator responsible for Extension resources.
 func NewActuator(mgr manager.Manager, config config.ControllerConfiguration) extension.Actuator {
+
+	ontap := getOntapClient(mgr, config)
+
 	return &actuator{
 		client:  mgr.GetClient(),
 		decoder: serializer.NewCodecFactory(mgr.GetScheme(), serializer.EnableStrict).UniversalDecoder(),
@@ -54,7 +59,17 @@ func NewActuator(mgr manager.Manager, config config.ControllerConfiguration) ext
 	}
 }
 
+func getOntapClient(mgr manager.Manager, config config.ControllerConfiguration) *ontap.Ontap {
+	client := mgr.GetClient()
+
+	var secret corev1.Secret
+	client.Get(context.Background(), client.ObjectKeyFromObject(config.AuthSecretRef), &secret, nil)
+
+	return nil
+}
+
 type actuator struct {
+	ontap   *ontap.Ontap
 	client  client.Client
 	decoder runtime.Decoder
 	config  config.ControllerConfiguration
