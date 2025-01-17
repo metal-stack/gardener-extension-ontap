@@ -71,7 +71,10 @@ func getOntapClient(mgr manager.Manager, config config.ControllerConfiguration) 
 
 	// FIXME Namespace of secret is empty
 	var secret corev1.Secret
-	client.Get(context.Background(), types.NamespacedName{Name: config.AuthSecretRef}, &secret, nil)
+	err := client.Get(context.Background(), types.NamespacedName{Name: config.AuthSecretRef}, &secret, nil)
+	if err != nil {
+		return nil, err
+	}
 	username, ok := secret.Data["username"]
 	if !ok {
 		return nil, fmt.Errorf("unable to fetch username from authsecret")
@@ -101,6 +104,7 @@ func getOntapClient(mgr manager.Manager, config config.ControllerConfiguration) 
 }
 
 type actuator struct {
+	log     logr.Logger
 	ontap   *ontapv1.Ontap
 	client  client.Client
 	decoder runtime.Decoder
@@ -117,7 +121,10 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		}
 	}
 
-	ontapConfig.ConfigureDefaults()
+	err := ontapConfig.ConfigureDefaults()
+	if err != nil {
+		return err
+	}
 	if !ontapConfig.IsValid(log) {
 		return fmt.Errorf("invalid csi-driver-lvm configuration")
 	}
@@ -412,8 +419,9 @@ func (a *actuator) controllerObjects() ([]client.Object, error) {
 	return objects, nil
 }
 
-func (a *actuator) pluginObjects(ontapConfig *v1alpha1.TridentConfig) ([]client.Object, error) {
+func (a *actuator) pluginObjects(ontapConfig *v1alpha1.TridentConfig) ([]client.Object, error) { //nolint:all
 
+	a.log.Info("ontap config", "o", ontapConfig)
 	ontapDriver := &storagev1.CSIDriver{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "csi-driver-lvm",

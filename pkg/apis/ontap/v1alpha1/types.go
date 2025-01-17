@@ -33,7 +33,7 @@ type Protocol string
 
 func (config *TridentConfig) IsValid(log logr.Logger) bool {
 	if slices.Contains(config.Protocols, "nvme") {
-		log.Error(errors.New("protocol nvme is required"), "protocols", config.Protocols)
+		log.Error(errors.New("protocol nvme is required"), "err", "protocols", config.Protocols)
 		return false
 	}
 
