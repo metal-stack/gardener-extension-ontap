@@ -70,7 +70,6 @@ check-generate:
 
 .PHONY: generate
 generate: $(VGOPATH) $(HELM) $(YQ)
-	# echo $(shell git -c safe.directory=/go/src/github.com/metal-stack/gardener-extension-ontap describe --abbrev=0 --tags) > VERSION
 	@REPO_ROOT=$(REPO_ROOT) VGOPATH=$(VGOPATH) GARDENER_HACK_DIR=$(GARDENER_HACK_DIR) bash $(GARDENER_HACK_DIR)/generate-sequential.sh ./charts/... ./cmd/... ./pkg/...
 
 .PHONY: generate-in-docker

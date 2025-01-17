@@ -86,7 +86,7 @@ rules:
   resources:
   - leases
   resourceNames:
-  - extension-csi-driver-lvm-leader-election
+  - extension-ontap-leader-election
   verbs:
   - update
   - get

@@ -1,11 +1,11 @@
 images:
-- name: csi-driver-lvm
-  sourceRepository: https://github.com/metal-stack/csi-driver-lvm
-  repository:  ghcr.io/metal-stack/csi-driver-lvm
+- name: ontap
+  sourceRepository: https://github.com/metal-stack/ontap
+  repository:  ghcr.io/metal-stack/ontap
   tag: "v0.6.0"
-- name: csi-driver-lvm-provisioner
-  sourceRepository: https://github.com/metal-stack/csi-driver-lvm
-  repository:  ghcr.io/metal-stack/csi-driver-lvm-provisioner
+- name: ontap-provisioner
+  sourceRepository: https://github.com/metal-stack/ontap
+  repository:  ghcr.io/metal-stack/ontap-provisioner
   tag: "v0.6.0"
 - name: csi-attacher
   sourceRepository: https://github.com/kubernetes-csi/external-attacher
