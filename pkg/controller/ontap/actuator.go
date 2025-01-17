@@ -20,11 +20,14 @@ import (
 	"github.com/metal-stack/metal-lib/pkg/pointer"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	ontap "github.com/metal-stack/ontap-go/pkg/client"
+	ontapv1 "github.com/metal-stack/ontap-go/api/client"
+	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -48,28 +51,57 @@ const (
 )
 
 // NewActuator returns an actuator responsible for Extension resources.
-func NewActuator(mgr manager.Manager, config config.ControllerConfiguration) extension.Actuator {
+func NewActuator(mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
 
-	ontap := getOntapClient(mgr, config)
+	ontap, err := getOntapClient(mgr, config)
 
+	if err != nil {
+		return nil, err
+	}
 	return &actuator{
+		ontap:   ontap,
 		client:  mgr.GetClient(),
 		decoder: serializer.NewCodecFactory(mgr.GetScheme(), serializer.EnableStrict).UniversalDecoder(),
 		config:  config,
-	}
+	}, nil
 }
 
-func getOntapClient(mgr manager.Manager, config config.ControllerConfiguration) *ontap.Ontap {
+func getOntapClient(mgr manager.Manager, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
 	client := mgr.GetClient()
 
+	// FIXME Namespace of secret is empty
 	var secret corev1.Secret
-	client.Get(context.Background(), client.ObjectKeyFromObject(config.AuthSecretRef), &secret, nil)
+	client.Get(context.Background(), types.NamespacedName{Name: config.AuthSecretRef}, &secret, nil)
+	username, ok := secret.Data["username"]
+	if !ok {
+		return nil, fmt.Errorf("unable to fetch username from authsecret")
+	}
+	password, ok := secret.Data["password"]
+	if !ok {
+		return nil, fmt.Errorf("unable to fetch password from authsecret")
+	}
 
-	return nil
+	hostname, ok := secret.Data["hostname"]
+	if !ok {
+		return nil, fmt.Errorf("unable to fetch hostname from authsecret")
+	}
+
+	cfg := ontapclient.Config{
+		AdminUser:     string(username),
+		AdminPassword: string(password),
+		Host:          string(hostname),
+	}
+
+	ontap, err := ontapclient.NewAPIClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return ontap, nil
 }
 
 type actuator struct {
-	ontap   *ontap.Ontap
+	ontap   *ontapv1.Ontap
 	client  client.Client
 	decoder runtime.Decoder
 	config  config.ControllerConfiguration
@@ -781,7 +813,7 @@ func (a *actuator) pluginObjects(ontapConfig *v1alpha1.TridentConfig) ([]client.
 }
 
 func (a *actuator) isOldCsiLvmExisting(ctx context.Context, shootNamespace string) (bool, error) {
-	_, shootClient, err := gutil.NewClientForShoot(ctx, a.client, shootNamespace, client.Options{}, extensionsconfig.RESTOptions{})
+	_, shootClient, err := gutil.NewClientForShoot(ctx, a.client, shootNamespace, k8sclient.Options{}, extensionsconfig.RESTOptions{})
 
 	if err != nil {
 		return true, fmt.Errorf("failed to create shoot client: %w", err)
@@ -792,7 +824,7 @@ func (a *actuator) isOldCsiLvmExisting(ctx context.Context, shootNamespace strin
 			Name: oldNamespace,
 		},
 	}
-	err = shootClient.Get(ctx, client.ObjectKeyFromObject(namespace), namespace)
+	err = shootClient.Get(ctx, k8sclient.ObjectKeyFromObject(namespace), namespace)
 
 	if err == nil {
 		return true, nil
