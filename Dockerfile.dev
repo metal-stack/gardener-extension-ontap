@@ -1,0 +1,3 @@
+FROM alpine:3.21
+COPY bin/gardener-extension-ontap /gardener-extension-ontap
+CMD ["/gardener-extension-ontap"]
