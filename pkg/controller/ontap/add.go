@@ -43,7 +43,7 @@ func AddToManager(ctx context.Context, mgr manager.Manager) error {
 // The opts.Reconciler is being set with a newly instantiated actuator.
 func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddOptions) error {
 
-	actuator, err := NewActuator(mgr, opts.Config) //nolint:all
+	actuator, err := NewActuator(mgr, opts.Config)
 
 	if err != nil {
 		return err
