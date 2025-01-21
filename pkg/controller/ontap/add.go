@@ -47,7 +47,7 @@ func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddO
 	opts.Config.ClusterManagementIp = "test"
 	opts.Config.AuthSecretNamespace = "garden"
 
-	actuator, err := NewActuator(mgr, opts.Config)
+	actuator, err := NewActuator(ctx, mgr, opts.Config)
 
 	if err != nil {
 		return err

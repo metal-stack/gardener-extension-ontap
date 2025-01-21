@@ -51,9 +51,9 @@ const (
 )
 
 // NewActuator returns an actuator responsible for Extension resources.
-func NewActuator(mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
+func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
 
-	ontap, err := createAdminClient(mgr, config)
+	ontap, err := createAdminClient(ctx, mgr, config)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func NewActuator(mgr manager.Manager, config config.ControllerConfiguration) (ex
 	}, nil
 }
 
-func createAdminClient(mgr manager.Manager, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
+func createAdminClient(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
 	client := mgr.GetAPIReader()
 
 	if client == nil {
@@ -77,7 +77,7 @@ func createAdminClient(mgr manager.Manager, config config.ControllerConfiguratio
 	}
 
 	var secret corev1.Secret
-	err := client.Get(context.Background(), types.NamespacedName{Name: config.AdminAuthSecretRef, Namespace: config.AuthSecretNamespace}, &secret)
+	err := client.Get(ctx, types.NamespacedName{Name: config.AdminAuthSecretRef, Namespace: config.AuthSecretNamespace}, &secret)
 	if err != nil {
 		return nil, err
 	}
