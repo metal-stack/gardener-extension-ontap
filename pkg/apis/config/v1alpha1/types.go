@@ -11,11 +11,14 @@ import (
 type ControllerConfiguration struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// OntapEndpoint is the endpoint where the ontap rest api is accessible, can be a hostname or a ip address.
-	OntapEndpoint string `json:"svmName,omitempty"`
+	// ClusterManagementIp is the endpoint where the ontap rest api is accessible
+	ClusterManagementIp string `json:"clusterManagementIp,omitempty"`
 
 	// AuthSecretRef references to the secret which contains the auth credentials to connect to the ontap rest api.
-	AuthSecretRef string `json:"authSecretRef,omitempty"`
+	AdminAuthSecretRef string `json:"adminAuthSecret,omitempty"`
+
+	// AuthSecretNamespace references the shoot namespace where the secret is stored to access the svm
+	AuthSecretNamespace string `json:"authSecretNamespace,omitempty"`
 
 	// HealthCheckConfig is the config for the health check controller
 	// +optional

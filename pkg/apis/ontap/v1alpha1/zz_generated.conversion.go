@@ -40,7 +40,9 @@ func RegisterConversions(s *runtime.Scheme) error {
 func autoConvert_v1alpha1_TridentConfig_To_ontap_TridentConfig(in *TridentConfig, out *ontap.TridentConfig, s conversion.Scope) error {
 	out.SVMName = in.SVMName
 	out.Protocols = *(*ontap.Protocols)(unsafe.Pointer(&in.Protocols))
-	out.AuthSecretRef = in.AuthSecretRef
+	out.SVMSecretRef = in.SVMSecretRef
+	out.ManagementLIF = in.ManagementLIF
+	out.DataLIF = in.DataLIF
 	return nil
 }
 
@@ -52,7 +54,9 @@ func Convert_v1alpha1_TridentConfig_To_ontap_TridentConfig(in *TridentConfig, ou
 func autoConvert_ontap_TridentConfig_To_v1alpha1_TridentConfig(in *ontap.TridentConfig, out *TridentConfig, s conversion.Scope) error {
 	out.SVMName = in.SVMName
 	out.Protocols = *(*Protocols)(unsafe.Pointer(&in.Protocols))
-	out.AuthSecretRef = in.AuthSecretRef
+	out.SVMSecretRef = in.SVMSecretRef
+	out.ManagementLIF = in.ManagementLIF
+	out.DataLIF = in.DataLIF
 	return nil
 }
 

@@ -27,7 +27,7 @@ make kind-up
 1. Deploy Gardener:
 
 ```bash
-make gardener-up
+    make gardener-up
 ```
 
 2. Generate Helm Charts

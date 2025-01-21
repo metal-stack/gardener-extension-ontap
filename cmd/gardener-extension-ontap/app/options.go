@@ -70,10 +70,9 @@ func NewOptions() *Options {
 			MaxConcurrentReconciles: 5,
 		},
 
-		controllerSwitches: &controllercmd.SwitchOptions{},
 		//Throws Panic
-		// controllerSwitches: ontapcmd.ControllerSwitchOptions(),
-		reconcileOptions: &controllercmd.ReconcilerOptions{IgnoreOperationAnnotation: true},
+		controllerSwitches: ontapcmd.ControllerSwitchOptions(),
+		reconcileOptions:   &controllercmd.ReconcilerOptions{IgnoreOperationAnnotation: true},
 	}
 
 	options.optionAggregator = controllercmd.NewOptionAggregator(

@@ -14,7 +14,7 @@ const (
 	// Type is the type of Extension resource.
 	Type = "ontap"
 	// ControllerName is the name of the registry cache service controller.
-	ControllerName = "ontap"
+	ControllerName = "ontap_controller"
 	// FinalizerSuffix is the finalizer suffix for the registry cache service controller.
 	FinalizerSuffix = "ontap"
 )
@@ -42,6 +42,10 @@ func AddToManager(ctx context.Context, mgr manager.Manager) error {
 // AddToManagerWithOptions adds a controller with the given Options to the given manager.
 // The opts.Reconciler is being set with a newly instantiated actuator.
 func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddOptions) error {
+
+	opts.Config.AdminAuthSecretRef = "admin-access"
+	opts.Config.ClusterManagementIp = "test"
+	opts.Config.AuthSecretNamespace = "garden"
 
 	actuator, err := NewActuator(mgr, opts.Config)
 

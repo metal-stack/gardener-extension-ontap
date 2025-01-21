@@ -53,8 +53,7 @@ const (
 // NewActuator returns an actuator responsible for Extension resources.
 func NewActuator(mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
 
-	ontap, err := getOntapClient(mgr, config)
-
+	ontap, err := createAdminClient(mgr, config)
 	if err != nil {
 		return nil, err
 	}
@@ -66,12 +65,19 @@ func NewActuator(mgr manager.Manager, config config.ControllerConfiguration) (ex
 	}, nil
 }
 
-func getOntapClient(mgr manager.Manager, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
-	client := mgr.GetClient()
+func createAdminClient(mgr manager.Manager, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
+	client := mgr.GetAPIReader()
 
-	// FIXME Namespace of secret is empty
+	if client == nil {
+		return nil, fmt.Errorf("Kubernetes client is not initialized")
+	}
+
+	if config.AdminAuthSecretRef == "" || config.ClusterManagementIp == "" || config.AuthSecretNamespace == "" {
+		return nil, fmt.Errorf("missing fields in config")
+	}
+
 	var secret corev1.Secret
-	err := client.Get(context.Background(), types.NamespacedName{Name: config.AuthSecretRef}, &secret, nil)
+	err := client.Get(context.Background(), types.NamespacedName{Name: config.AdminAuthSecretRef, Namespace: config.AuthSecretNamespace}, &secret)
 	if err != nil {
 		return nil, err
 	}
@@ -83,16 +89,15 @@ func getOntapClient(mgr manager.Manager, config config.ControllerConfiguration) 
 	if !ok {
 		return nil, fmt.Errorf("unable to fetch password from authsecret")
 	}
-
-	hostname, ok := secret.Data["hostname"]
+	clusterIp, ok := secret.Data["clusterIp"]
 	if !ok {
-		return nil, fmt.Errorf("unable to fetch hostname from authsecret")
+		return nil, fmt.Errorf("unable to fetch clusterIp from authsecret")
 	}
 
 	cfg := ontapclient.Config{
 		AdminUser:     string(username),
 		AdminPassword: string(password),
-		Host:          string(hostname),
+		Host:          string(clusterIp),
 	}
 
 	ontap, err := ontapclient.NewAPIClient(cfg)
@@ -121,7 +126,8 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		}
 	}
 
-	err := ontapConfig.ConfigureDefaults()
+	test := "string"
+	err := ontapConfig.ConfigureDefaults(&test, &test)
 	if err != nil {
 		return err
 	}

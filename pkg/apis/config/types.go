@@ -12,11 +12,14 @@ import (
 type ControllerConfiguration struct {
 	metav1.TypeMeta
 
-	// OntapEndpoint is the endpoint where the ontap rest api is accessible, can be a hostname or a ip address.
-	OntapEndpoint string
+	// ClusterManagementIp is the endpoint where the ontap rest api is accessible, for the seed cluster to connect to in order to create and manage svms
+	ClusterManagementIp string
 
-	// AuthSecretRef references to the secret which contains the auth credentials to connect to the ontap rest api.
-	AuthSecretRef string
+	// AdminAuthSecretRef references to the secret which contains the auth credentials to connect to the cluster management ip
+	AdminAuthSecretRef string
+
+	// AuthSecretNamespace references the seed namespace where the secret is stored to access the cluster management ip
+	AuthSecretNamespace string
 
 	// HealthCheckConfig is the config for the health check controller
 	HealthCheckConfig *healthcheckconfig.HealthCheckConfig

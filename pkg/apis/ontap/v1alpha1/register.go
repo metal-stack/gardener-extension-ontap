@@ -6,7 +6,7 @@ import (
 )
 
 // GroupName is the group name use in this package
-const GroupName = "csi-driver-lvm.metal.extensions.gardener.cloud"
+const GroupName = "ontap.metal.extensions.gardener.cloud"
 
 // SchemeGroupVersion is group version used to register these objects
 var SchemeGroupVersion = schema.GroupVersion{Group: GroupName, Version: "v1alpha1"}

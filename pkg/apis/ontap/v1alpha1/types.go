@@ -25,8 +25,14 @@ type TridentConfig struct {
 	// Protocols to use to mount the volume, only NVMe is used for now.
 	Protocols Protocols `json:"protocols,omitempty"`
 
-	// AuthSecretRef references to the secret which contains the auth credentials to connect to the svm
-	AuthSecretRef string `json:"authSecretRef,omitempty"`
+	// Svm references to the secret which contains the auth credentials to connect to the svm, it is under the shootnamespace
+	SVMSecretRef string `json:"svmSecretRef,omitempty"`
+
+	// ManagementLIF is the ip of the management of the newly created svm
+	ManagementLIF string `json:"managementLIF,omitempty"`
+
+	// DataLIF is the ip for the data management of the newly created svm
+	DataLIF string `json:"dataLIF,omitempty"`
 }
 type Protocols []Protocol
 type Protocol string
@@ -42,7 +48,18 @@ func (config *TridentConfig) IsValid(log logr.Logger) bool {
 	return true
 }
 
-func (config *TridentConfig) ConfigureDefaults() error {
-	// FIXME consider defaulting
+func (config *TridentConfig) ConfigureDefaults(svmName *string, svmSecretRef *string) error {
+	if config.SVMName == "" && svmName != nil {
+		config.SVMName = *svmName
+	}
+	if config.SVMSecretRef == "" && svmSecretRef != nil {
+		config.SVMSecretRef = *svmSecretRef
+	}
+
+	// if config.Protocols == nil || len(config.Protocols) == 0 {
+	// 	if defaultProtocols != nil {
+	// 		config.Protocols = *defaultProtocols
+	// 	}
+	// }
 	return nil
 }

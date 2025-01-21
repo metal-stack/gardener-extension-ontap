@@ -17,7 +17,12 @@ spec:
     providerConfig:
       apiVersion: ontap.metal.extensions.gardener.cloud/v1alpha1
       kind: TridentConfig
-      # Your configuration here
+      svmName: "example-svm-name"
+      protocols:
+        - "nvme"
+      svmSecretRef: "svm-secret"
+      managementLIF: "192.168.0.1"
+      dataLIF: "192.168.0.2"
   networking:
     type: calico
     nodes: 10.10.0.0/16
