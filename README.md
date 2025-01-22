@@ -58,6 +58,11 @@ make push-to-gardener-local
 ```
 
 
+# Sequence Diagram
+
+<img src="sequence_diagram.drawio.svg">
+
+
 # Notes
 
 doc.go has been temporarily modified to bypass the use of VERSION. This needs to be fixed.
