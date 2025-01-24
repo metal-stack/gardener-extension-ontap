@@ -194,8 +194,16 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1
 func (a *actuator) deployTridentResources(ctx context.Context, ex *extensionsv1alpha1.Extension) error {
 	yamlDir := "/charts/trident"
 
-	if err := services.DeployYAMLsToShoot(ctx, a.client, ex.Namespace, "trident-operator", yamlDir); err != nil {
+	if err := services.DeployYAMLsToShoot(
+		ctx,
+		a.client,
+		ex.Namespace,
+		"trident-operator",
+		yamlDir,
+	); err != nil {
 		return fmt.Errorf("deploying trident from yamls failed: %w", err)
 	}
+
+	a.log.Info("trident operator mr ready to be deployed into shoot")
 	return nil
 }
