@@ -90,5 +90,5 @@ push-to-gardener-local:
 		-tags 'osusergo netgo static_build' \
 		-o bin/gardener-extension-ontap \
 		./cmd/gardener-extension-ontap
-	docker build -f Dockerfile.dev -t ghcr.io/metal-stack/gardener-extension-ontap:latest .
+	docker build -f Dockerfile -t ghcr.io/metal-stack/gardener-extension-ontap:latest .
 	kind --name gardener-local load docker-image ghcr.io/metal-stack/gardener-extension-ontap:latest

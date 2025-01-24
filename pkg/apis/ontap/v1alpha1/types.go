@@ -1,9 +1,6 @@
 package v1alpha1
 
 import (
-	"errors"
-	"slices"
-
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -25,23 +22,23 @@ type TridentConfig struct {
 	// Protocols to use to mount the volume, only NVMe is used for now.
 	Protocols Protocols `json:"protocols,omitempty"`
 
-	// Svm references to the secret which contains the auth credentials to connect to the svm, it is under the shootnamespace
+	// SvmSecretRef references to the secret which contains the auth credentials and the lif ips to connect to the svm
 	SVMSecretRef string `json:"svmSecretRef,omitempty"`
 
-	// ManagementLIF is the ip of the management of the newly created svm
-	ManagementLIF string `json:"managementLIF,omitempty"`
+	// DataLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
+	DataLif string `json:"dataLif,omitempty"`
 
-	// DataLIF is the ip for the data management of the newly created svm
-	DataLIF string `json:"dataLIF,omitempty"`
+	// ManagementLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
+	ManagementLif string `json:"managementLif,omitempty"`
 }
 type Protocols []Protocol
 type Protocol string
 
 func (config *TridentConfig) IsValid(log logr.Logger) bool {
-	if slices.Contains(config.Protocols, "nvme") {
-		log.Error(errors.New("protocol nvme is required"), "err", "protocols", config.Protocols)
-		return false
-	}
+	// if slices.Contains(config.Protocols, "nvme") {
+	// 	log.Error(errors.New("protocol nvme is required"), "err", "protocols", config.Protocols)
+	// 	return false
+	// }
 
 	// FIXME more validations
 

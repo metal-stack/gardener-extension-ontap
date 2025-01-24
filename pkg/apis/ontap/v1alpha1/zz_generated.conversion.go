@@ -41,8 +41,8 @@ func autoConvert_v1alpha1_TridentConfig_To_ontap_TridentConfig(in *TridentConfig
 	out.SVMName = in.SVMName
 	out.Protocols = *(*ontap.Protocols)(unsafe.Pointer(&in.Protocols))
 	out.SVMSecretRef = in.SVMSecretRef
-	out.ManagementLIF = in.ManagementLIF
-	out.DataLIF = in.DataLIF
+	out.DataLif = in.DataLif
+	out.ManagementLif = in.ManagementLif
 	return nil
 }
 
@@ -55,8 +55,8 @@ func autoConvert_ontap_TridentConfig_To_v1alpha1_TridentConfig(in *ontap.Trident
 	out.SVMName = in.SVMName
 	out.Protocols = *(*Protocols)(unsafe.Pointer(&in.Protocols))
 	out.SVMSecretRef = in.SVMSecretRef
-	out.ManagementLIF = in.ManagementLIF
-	out.DataLIF = in.DataLIF
+	out.DataLif = in.DataLif
+	out.ManagementLif = in.ManagementLif
 	return nil
 }
 

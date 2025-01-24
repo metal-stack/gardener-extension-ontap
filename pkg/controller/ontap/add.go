@@ -8,6 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
+	runtimelog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -23,6 +24,7 @@ var (
 	// DefaultAddOptions are the default AddOptions for AddToManager.
 	DefaultAddOptions = AddOptions{}
 )
+var log = runtimelog.Log.WithName("gardener-extension-ontap")
 
 // AddOptions are options to apply when adding the registry cache service controller to the manager.
 type AddOptions struct {
@@ -47,7 +49,7 @@ func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddO
 	opts.Config.ClusterManagementIp = "test"
 	opts.Config.AuthSecretNamespace = "garden"
 
-	actuator, err := NewActuator(ctx, mgr, opts.Config)
+	actuator, err := NewActuator(log, ctx, mgr, opts.Config)
 
 	if err != nil {
 		return err

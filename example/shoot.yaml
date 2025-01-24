@@ -7,6 +7,7 @@ metadata:
   annotations:
     shoot.gardener.cloud/infrastructure-cleanup-wait-period-seconds: "0"
     shoot.gardener.cloud/cloud-config-execution-max-delay-seconds: "0"
+    cluster.metal-stack.io/project: b5f26a3b-9a4d-48db-a6b3-d1dd4ac4abec
 spec:
   seedName: local
   cloudProfileName: local
@@ -17,12 +18,12 @@ spec:
     providerConfig:
       apiVersion: ontap.metal.extensions.gardener.cloud/v1alpha1
       kind: TridentConfig
-      svmName: "example-svm-name"
+      svmName: example-svm-name
       protocols:
         - "nvme"
-      svmSecretRef: "svm-secret"
-      managementLIF: "192.168.0.1"
-      dataLIF: "192.168.0.2"
+      svmSecretRef: svm-access
+      managementLif: 192.168.0.1
+      dataLif: 192.168.0.2
   networking:
     type: calico
     nodes: 10.10.0.0/16

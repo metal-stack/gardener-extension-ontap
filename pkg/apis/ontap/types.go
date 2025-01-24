@@ -17,14 +17,14 @@ type TridentConfig struct {
 	// Protocols to use to mount the volume, only NVMe is used for now.
 	Protocols Protocols
 
-	// SvmSecretRef references to the secret which contains the auth credentials to connect to the svm
+	// SvmSecretRef references to the secret which contains the auth credentials and the lif ips to connect to the svm
 	SVMSecretRef string
 
-	// ManagementLIF is the ip of the management of the newly created svm
-	ManagementLIF string
+	// DataLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
+	DataLif string
 
-	// DataLIF is the ip for the data management of the newly created svm
-	DataLIF string
+	// ManagementLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
+	ManagementLif string
 }
 
 type Protocols []Protocol

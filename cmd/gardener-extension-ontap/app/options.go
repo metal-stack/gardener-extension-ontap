@@ -91,7 +91,7 @@ func NewOptions() *Options {
 }
 
 func (options *Options) run(ctx context.Context) error {
-	log.Info("starting " + ExtensionName)
+	log.Info("starting extension", "ex", ExtensionName)
 
 	util.ApplyClientConnectionConfigurationToRESTConfig(&componentbaseconfig.ClientConnectionConfiguration{
 		QPS:   100.0,
