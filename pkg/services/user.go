@@ -22,7 +22,7 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 
 	application := "http"
 	authentication_methods := "password"
-	accountName := "FIXM2E"
+	accountName := "vsadmin"
 	vsadmin := "vsadmin"
 	var password strfmt.Password = "fsqe2020"
 	secretName := "my-secret"

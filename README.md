@@ -66,3 +66,8 @@ make push-to-gardener-local
 # Notes
 
 doc.go has been temporarily modified to bypass the use of VERSION. This needs to be fixed.
+
+./hack/usage/delete shoot local  garden-local # Deleting shoot cluster
+
+
+kubectl -n garden-<project-name> annotate shoot <shoot-name> gardener.cloud/operation=reconcile

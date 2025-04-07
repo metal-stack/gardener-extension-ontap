@@ -92,3 +92,7 @@ push-to-gardener-local:
 		./cmd/gardener-extension-ontap
 	docker build -f Dockerfile -t ghcr.io/metal-stack/gardener-extension-ontap:latest .
 	kind --name gardener-local load docker-image ghcr.io/metal-stack/gardener-extension-ontap:latest
+
+.PHONY: delete
+delete-shoot:
+	../gardener/hack/usage/delete shoot local  garden-local

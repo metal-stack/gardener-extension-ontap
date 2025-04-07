@@ -21,8 +21,20 @@ var (
 
 // CreateSVM creates an SVM for the given user/project
 func CreateSVM(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) error {
-	fmt.Printf("Creating SVM: %s ", svmName)
+	log.Info("Creating SVM", "name", svmName)
 
+	// First check if the SVM already exists to avoid duplicates
+	_, err := GetSVMByName(log, ontapClient, svmName)
+	if err == nil {
+		// SVM already exists
+		log.Info("SVM already exists, skipping creation", "name", svmName)
+		return nil
+	} else if !errors.Is(err, ErrNotFound) {
+		// There was an error checking for the SVM
+		return fmt.Errorf("error checking if SVM exists: %w", err)
+	}
+
+	// SVM does not exist, create it
 	params := s_vm.NewSvmCreateParams()
 	params.Info = &models.Svm{
 		Name: &svmName,
@@ -35,12 +47,49 @@ func CreateSVM(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) erro
 			Allowed: pointer.Pointer(true),
 		},
 	}
-	_, _, err := ontapClient.SVM.SvmCreate(params, nil)
 
+	// Debug: Log request parameters
+	log.Info("Sending SVM create request", "params", fmt.Sprintf("%+v", params))
+
+	// Add detailed error handling
+	resp, _, err := ontapClient.SVM.SvmCreate(params, nil)
 	if err != nil {
+		// Log the detailed error
+		log.Error(err, "Failed to create SVM", "name", svmName)
+
+		// Check for specific error types
+		if apiErr, ok := err.(*s_vm.SvmCreateDefault); ok {
+			log.Error(err, "API Error", "code", apiErr.Code(), "message", apiErr.Error())
+			if apiErr.GetPayload() != nil {
+				log.Error(err, "API Error Payload", "payload", fmt.Sprintf("%+v", apiErr.GetPayload()))
+			}
+		}
+
 		return fmt.Errorf("failed to create SVM: %w", err)
 	}
-	fmt.Println("SVM created successfully.")
+
+	// The response might be nil or have a nil payload, but that's okay
+	// The ONTAP API might return a job response or a direct response
+	if resp != nil && resp.Payload != nil {
+		log.Info("SVM creation response received",
+			"name", svmName,
+			"payload", fmt.Sprintf("%+v", resp.Payload))
+	} else {
+		log.Info("SVM creation initiated with empty response", "name", svmName)
+	}
+
+	// Check if the SVM was actually created
+	uuid, err := GetSVMByName(log, ontapClient, svmName)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// SVM is not found, but that's expected as creation might be async
+			log.Info("SVM not found immediately after creation request, will check on next reconciliation", "name", svmName)
+			return nil
+		}
+		return fmt.Errorf("error checking if SVM was created: %w", err)
+	}
+
+	log.Info("SVM created successfully", "name", svmName, "uuid", uuid)
 	return nil
 }
 
@@ -94,17 +143,26 @@ func GetSVMByName(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) (
 
 	if svmGetOK == nil || svmGetOK.Payload == nil {
 		log.Info("No SVM data available.")
-		return "", nil
+		return "", ErrNotFound
 	}
-	log.Info("before foor loop in getsvm by name")
+
+	log.Info("Checking for SVM with name", "name", svmName)
+
+	if svmGetOK.Payload.SvmResponseInlineRecords == nil || len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
+		log.Info("No SVMs found in the response")
+		return "", ErrNotFound
+	}
+
 	for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
 		if svm.Name != nil && *svm.Name == svmName {
 			if svm.UUID != nil {
+				log.Info("Found SVM", "name", svmName, "uuid", *svm.UUID)
 				return *svm.UUID, nil
 			}
 			return "", fmt.Errorf("UUID not available for the SVM named %s", svmName)
 		}
 	}
-	log.Info("after foor loop in getsvm by name")
+
+	log.Info("SVM not found", "name", svmName)
 	return "", ErrNotFound
 }
