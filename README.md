@@ -71,3 +71,9 @@ doc.go has been temporarily modified to bypass the use of VERSION. This needs to
 
 
 kubectl -n garden-<project-name> annotate shoot <shoot-name> gardener.cloud/operation=reconcile
+
+
+Still a bug:
+
+    Message:               error during apply of object "v1/ServiceAccount/trident/trident-operator": unable to get: trident/trident-operator because of unknown namespace for the cache
+
