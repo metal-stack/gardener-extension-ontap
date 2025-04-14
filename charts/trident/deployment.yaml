@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: operator.trident.netapp.io
+  name: trident-operator
+  namespace: trident
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: operator.trident.netapp.io
+      name: trident-operator
+  template:
+    metadata:
+      labels:
+        app: operator.trident.netapp.io
+        name: trident-operator
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - arm64
+                - amd64
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                - linux
+      serviceAccountName: trident-operator
+      containers:
+      - command:
+        - /trident-operator
+        - -debug
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: OPERATOR_NAME
+          value: trident-operator
+        image: docker.io/netapp/trident-operator:25.02.1
+        imagePullPolicy: IfNotPresent
+        name: trident-operator
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "40Mi"
+          limits:
+            cpu: "20m"
+            memory: "80Mi" 

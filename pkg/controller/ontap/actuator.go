@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	extensionsconfig "github.com/gardener/gardener/extensions/pkg/apis/config"
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
@@ -184,19 +185,38 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 			Name: "trident",
 		},
 	}
-	err = shootClient.Create(ctx, tridentNamespace)
-	if err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			a.log.Info("Failed to create trident namespace, it likely already exists", "error", err)
+
+	// Check if the namespace exists first
+	existingNamespace := &corev1.Namespace{}
+	err = shootClient.Get(ctx, client.ObjectKey{Name: "trident"}, existingNamespace)
+	namespaceExists := err == nil
+
+	if !namespaceExists {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to check if trident namespace exists: %w", err)
 		}
-	} else {
+
+		// Namespace doesn't exist, create it
+		err = shootClient.Create(ctx, tridentNamespace)
+		if err != nil {
+			return fmt.Errorf("failed to create trident namespace in shoot: %w", err)
+		}
 		a.log.Info("Created trident namespace in shoot")
+	} else {
+		a.log.Info("Trident namespace already exists in shoot")
 	}
 
 	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace)
 	err = a.ensureSvmForProject(ctx, a.ontap, projectId, a.shootNamespace)
 	if err != nil {
 		return err
+	}
+
+	// Make sure the namespace is created before deploying resources
+	if !namespaceExists {
+		a.log.Info("Waiting for trident namespace to be ready before deploying resources")
+		// Small delay to ensure namespace is fully created
+		time.Sleep(2 * time.Second)
 	}
 
 	err = a.deployTridentResources(ctx, ex)
@@ -278,7 +298,11 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1
 }
 
 func (a *actuator) deployTridentResources(ctx context.Context, ex *extensionsv1alpha1.Extension) error {
+	// Use the relative path to the charts directory
+	// This path should be relative to where the extension runs in the container
 	yamlDir := "/charts/trident"
+
+	a.log.Info("Deploying Trident resources from directory", "directory", yamlDir)
 
 	if err := services.DeployYAMLsToShoot(
 		ctx,
@@ -290,6 +314,6 @@ func (a *actuator) deployTridentResources(ctx context.Context, ex *extensionsv1a
 		return fmt.Errorf("deploying trident from yamls failed: %w", err)
 	}
 
-	a.log.Info("trident operator mr ready to be deployed into shoot")
+	a.log.Info("Trident operator managed resource ready to be deployed into shoot")
 	return nil
 }
