@@ -14,7 +14,9 @@ import (
 
 // Constants for paths and names
 const (
+	// Constants for directory names
 	ResourcesDir          = "resources"
+	RbacDir               = "rbac"
 	CRDsDir               = "crds"
 	BackendsDir           = "backends"
 	StorageClassFilename  = "storageclass.yaml"
@@ -22,7 +24,9 @@ const (
 	DefaultChartPath      = "charts/trident"
 )
 
-func LoadYAMLFiles(dirPath string, excludeSubdirs ...string) (map[string][]byte, error) {
+// LoadYAMLFiles walks the given directory path and reads all YAML files,
+// returning them in a map where the key is the relative path with '/' replaced by '.'.
+func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	// Check if the base directory exists
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
@@ -31,24 +35,23 @@ func LoadYAMLFiles(dirPath string, excludeSubdirs ...string) (map[string][]byte,
 		fmt.Printf("Directory does not exist, returning empty map: %s\n", dirPath)
 		return result, nil
 	}
-	excludeAbsPaths := make(map[string]bool)
-	for _, subDir := range excludeSubdirs {
-		if subDir != "" {
-			excludeAbsPaths[filepath.Join(dirPath, subDir)] = true
-		}
-	}
+
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err // Propagate errors (e.g., permission issues)
 		}
-		// Check if the current path is an excluded directory
+		// Skip directories entirely
 		if info.IsDir() {
-			if _, excluded := excludeAbsPaths[path]; excluded {
-				fmt.Printf("Excluding directory during YAML load: %s\n", path)
-				return filepath.SkipDir // Don't process this directory further
+			// Skip the root directory itself from being processed as a file
+			if path == dirPath {
+				return nil
 			}
-			return nil // Continue walking into non-excluded directories
+			// We are not processing subdirectories in the current calls, but if we were,
+			// filepath.SkipDir could be used here if needed based on some condition.
+			// For now, just continue walking.
+			return nil
 		}
+
 		// Process only YAML files
 		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml") {
 			return nil
@@ -73,9 +76,9 @@ func LoadYAMLFiles(dirPath string, excludeSubdirs ...string) (map[string][]byte,
 	if err != nil {
 		return nil, fmt.Errorf("error walking %s: %w", dirPath, err)
 	}
-	// It's okay to return an empty map if no YAML files were found after exclusions
+	// It's okay to return an empty map if no YAML files were found
 	if len(result) == 0 {
-		fmt.Printf("No YAML files found in: %s (after potential exclusions)\n", dirPath)
+		fmt.Printf("No YAML files found in: %s\n", dirPath)
 	}
 	return result, nil
 }
@@ -124,12 +127,13 @@ func ProcessBackendTemplates(
 	dataLif string,
 	managementLif string,
 ) error {
-	// Create backend directory path
+	// Create backend directory path based on the correct structure
+	// chartPath/resources/backends
 	backendDir := filepath.Join(chartPath, ResourcesDir, BackendsDir)
 
 	// Ensure the backend directory exists
 	if err := os.MkdirAll(backendDir, 0755); err != nil {
-		return fmt.Errorf("failed to create backends directory: %w", err)
+		return fmt.Errorf("failed to create backends directory %s: %w", backendDir, err)
 	}
 
 	// Read template files

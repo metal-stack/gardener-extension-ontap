@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
+	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -35,9 +36,10 @@ import (
 // FIXME here the logic to deploy the trident operator
 
 const (
-	shootNamespace    string = "shoot--local--local"
+	//Why hardcod
 	tridentCRDsName   string = "trident-crds"
-	tridentOperatorMR string = "trident-operator"
+	tridentRbacMR     string = "extension-ontap-trident-rbac"
+	tridentBackendsMR string = "extension-ontap-trident-backends"
 )
 
 // NewActuator returns an actuator responsible for Extension resources.
@@ -103,17 +105,17 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		return nil, fmt.Errorf("failed to create ONTAP API client: %w", err)
 	}
 
-	// params := s_vm.NewSvmCollectionGetParams()
-	// result, err := ontap.SVM.SvmCollectionGet(params, nil)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
-	// }
+	params := s_vm.NewSvmCollectionGetParams()
+	result, err := ontap.SVM.SvmCollectionGet(params, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
+	}
 
-	// numSVMs := 0
-	// if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
-	// 	numSVMs = int(*result.Payload.NumRecords)
-	// }
-	// log.Info("Successfully connected to ONTAP. Found %d existing SVMs\n", numSVMs)
+	numSVMs := 0
+	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
+		numSVMs = int(*result.Payload.NumRecords)
+	}
+	log.Info("Successfully connected to ONTAP. Found %d existing SVMs\n", numSVMs)
 
 	return ontap, nil
 }
@@ -173,45 +175,74 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		"secretName", secretName,
 		"namespace", "kube-system")
 
-	chartPath := services.DefaultChartPath
-	baseResourcePath := filepath.Join(chartPath, services.ResourcesDir)
-	crdPath := filepath.Join(baseResourcePath, services.CRDsDir)
+	// Define base paths correctly based on the actual structure
+	chartPath := services.DefaultChartPath                  // "charts/trident"
+	resourcesPath := filepath.Join(chartPath, "resources")  // "charts/trident/resources"
+	rbacPath := filepath.Join(resourcesPath, "rbac")        // "charts/trident/resources/rbac"
+	crdPath := filepath.Join(resourcesPath, "crds")         // "charts/trident/resources/crds"
+	backendPath := filepath.Join(resourcesPath, "backends") // "charts/trident/resources/backends"
 
-	// Process backend templates in place
+	// Process backend templates - needs the correct path relative to chartPath for service
+	a.log.Info("Processing backend templates", "path", backendPath)
 	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName, dataLif, managementLif); err != nil {
 		return fmt.Errorf("failed to process backend templates: %w", err)
 	}
 
 	// 1. Load and Deploy CRDs
 	a.log.Info("Loading Trident CRDs", "path", crdPath)
-	crdYamls, err := services.LoadYAMLFiles(crdPath)
+	crdYamls, err := services.LoadYAMLFiles(crdPath) // Load only from the correct crdPath
 	if err != nil {
-		return fmt.Errorf("failed to load Trident CRDs: %w", err)
+		return fmt.Errorf("failed to load Trident CRDs from %s: %w", crdPath, err)
+	}
+	if len(crdYamls) > 0 {
+		a.log.Info("Deploying Trident CRDs managed resource", "namespace", a.shootNamespace, "name", tridentCRDsName)
+		if err := services.DeployResources(ctx, a.client, a.shootNamespace, tridentCRDsName, crdYamls); err != nil {
+			return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
+		}
+		// Wait for CRD Managed Resource to be Ready
+		a.log.Info("Waiting for Trident CRDs managed resource to be ready", "name", tridentCRDsName)
+		if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentCRDsName); err != nil {
+			return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
+		}
+		a.log.Info("Trident CRDs managed resource is ready", "name", tridentCRDsName)
+	} else {
+		a.log.Info("No CRDs found to deploy", "path", crdPath)
 	}
 
-	a.log.Info("Deploying Trident CRDs managed resource", "namespace", a.shootNamespace)
-	if err := services.DeployResources(ctx, a.client, a.shootNamespace, tridentCRDsName, crdYamls); err != nil {
-		return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
+	// 2. Load and Deploy RBAC Resources (NO exclusions needed anymore)
+	a.log.Info("Loading Trident RBAC resources", "path", rbacPath)
+	// Load only from the correct rbacPath, no exclusions needed as CRDs/Backends are separate dirs
+	rbacYamls, err := services.LoadYAMLFiles(rbacPath)
+	if err != nil {
+		return fmt.Errorf("failed to load Trident RBAC resources from %s: %w", rbacPath, err)
+	}
+	if len(rbacYamls) > 0 {
+		a.log.Info("Deploying Trident RBAC managed resource", "namespace", ex.Namespace, "name", tridentRbacMR)
+		err = services.DeployResources(ctx, a.client, ex.Namespace, tridentRbacMR, rbacYamls)
+		if err != nil {
+			return fmt.Errorf("failed to create managed resources for Trident RBAC: %w", err)
+		}
+		a.log.Info("Trident RBAC managed resource deployment initiated", "name", tridentRbacMR)
+	} else {
+		a.log.Info("No RBAC resources found to deploy", "path", rbacPath)
 	}
 
-	// 2. Wait for CRD Managed Resource to be Ready
-	a.log.Info("Waiting for Trident CRDs managed resource to be ready", "name", tridentCRDsName)
-	if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentCRDsName); err != nil {
-		return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
-	}
-	a.log.Info("Trident CRDs managed resource is ready")
-	// 3. Load and Deploy Remaining Resources
-	a.log.Info("Loading remaining Trident resources", "path", baseResourcePath, "excluding", services.CRDsDir)
-	otherYamls, err := services.LoadYAMLFiles(baseResourcePath, services.CRDsDir) // Exclude CRDsDir
+	// 3. Load and Deploy Backend Resources
+	a.log.Info("Loading Trident Backend resources", "path", backendPath)
+	backendYamls, err := services.LoadYAMLFiles(backendPath) // Load only from the correct backendPath
 	if err != nil {
-		return fmt.Errorf("failed to load remaining Trident resources: %w", err)
+		return fmt.Errorf("failed to load Trident Backend resources from %s: %w", backendPath, err)
 	}
-	a.log.Info("Deploying Trident Operator managed resource", "namespace", ex.Namespace)
-	err = services.DeployResources(ctx, a.client, ex.Namespace, tridentOperatorMR, otherYamls)
-	if err != nil {
-		return fmt.Errorf("failed to create managed resources for Trident operator: %w", err)
+	if len(backendYamls) > 0 {
+		a.log.Info("Deploying Trident Backends managed resource", "namespace", ex.Namespace, "name", tridentBackendsMR)
+		err = services.DeployResources(ctx, a.client, ex.Namespace, tridentBackendsMR, backendYamls)
+		if err != nil {
+			return fmt.Errorf("failed to create managed resources for Trident Backends: %w", err)
+		}
+		a.log.Info("Trident Backends managed resource deployment initiated", "name", tridentBackendsMR)
+	} else {
+		a.log.Info("No Backend resources found to deploy", "path", backendPath)
 	}
-	a.log.Info("Trident Operator managed resource deployment initiated")
 
 	a.log.Info("ONTAP extension reconciliation completed successfully")
 	return nil
@@ -219,10 +250,22 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 // Delete the Extension resource.
 func (a *actuator) Delete(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
-	if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentOperatorMR, false); err != nil {
+	if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentBackendsMR, false); err != nil {
 		return err
 	}
-	if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentOperatorMR); err != nil {
+	if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentBackendsMR); err != nil {
+		return err
+	}
+	if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentRbacMR, false); err != nil {
+		return err
+	}
+	if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentRbacMR); err != nil {
+		return err
+	}
+	if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentCRDsName, false); err != nil {
+		return err
+	}
+	if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentCRDsName); err != nil {
 		return err
 	}
 	log.Info("ManagedResource for Trident operator successfully deleted.")
