@@ -18,8 +18,8 @@ import (
 
 // SVM user constants
 const (
-	DefaultSVMUsername         = "vsadmin"
-	CredentialSecretNameFormat = "ontap-svm-%s-credentials" //gosec:G101 Format string with %s placeholder for project ID
+	DefaultSVMUsername = "vsadmin"
+	SecretNameFormat   = "ontap-svm-%s-credentials" //gosec:G101 Format string with %s placeholder for project ID
 )
 
 // CreateUserAndSecret creates an svm scoped account set to vsadmin role
@@ -39,10 +39,10 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 	}
 
 	// Create the secret name with project ID
-	secretName := fmt.Sprintf(CredentialSecretNameFormat, projectId)
+	secretName := fmt.Sprintf(SecretNameFormat, projectId)
 
 	// Create/update secret with credentials
-	err = deployTridentSecrets(ctx, log, secretName, DefaultSVMUsername, strfmt.Password(password), projectId, shootNamespace, seedClient, managementLif)
+	err = deployTridentSecrets(ctx, log, secretName, DefaultSVMUsername, strfmt.Password(password), projectId, shootNamespace, seedClient)
 	if err != nil {
 		return fmt.Errorf("failed to deploy secret: %w", err)
 	}
@@ -72,7 +72,7 @@ func checkIfAccountExistsForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, acc
 }
 
 // deployTridentSecrets creates or updates the secret for Trident
-func deployTridentSecrets(ctx context.Context, log logr.Logger, secretName string, userName string, password strfmt.Password, projectId string, shootNamespace string, seedClient client.Client, managementLif string) error {
+func deployTridentSecrets(ctx context.Context, log logr.Logger, secretName string, userName string, password strfmt.Password, projectId string, shootNamespace string, seedClient client.Client) error {
 	// Create one secret in kube-system namespace that will be used by Trident backend config
 	tridentSecret := buildSecret(secretName, userName, password.String(), projectId, "kube-system")
 	clientObjs := []client.Object{tridentSecret}

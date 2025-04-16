@@ -195,7 +195,7 @@ func GetSVMByName(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) (
 
 	log.Info("Checking for SVM with name", "name", svmName)
 
-	if svmGetOK.Payload.SvmResponseInlineRecords == nil || len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
+	if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
 		log.Info("No SVMs found in the response")
 		return "", ErrNotFound
 	}
