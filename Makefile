@@ -96,3 +96,7 @@ push-to-gardener-local:
 .PHONY: delete
 delete-shoot:
 	../gardener/hack/usage/delete shoot local  garden-local
+
+.PHONY: reconcile
+reconcile:
+	kubectl -n garden-local annotate shoot local gardener.cloud/operation=reconcile

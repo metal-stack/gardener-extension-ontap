@@ -1,10 +1,17 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: operator.trident.netapp.io
+  name: trident-operator
+  namespace: kube-system
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  creationTimestamp: null
-  name: trident-operator
   labels:
     app: operator.trident.netapp.io
+  name: trident-operator
 rules:
   # Permissions same as Trident
   - apiGroups:
@@ -113,14 +120,6 @@ rules:
   - apiGroups:
       - storage.k8s.io
     resources:
-      - csinodes
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - storage.k8s.io
-    resources:
       - volumeattachments
     verbs:
       - get
@@ -135,39 +134,81 @@ rules:
     verbs:
       - update
       - patch
-  # CSI provisioner specific permissions
   - apiGroups:
-      - ""
+      - snapshot.storage.k8s.io
     resources:
-      - endpoints
+      - volumesnapshots
+      - volumesnapshotclasses
     verbs:
       - get
-      - watch
       - list
-      - delete
-      - update
-      - create
-  - apiGroups:
-      - coordination.k8s.io
-    resources:
-      - leases
-    verbs:
-      - get
       - watch
-      - list
-      - delete
       - update
-      - create
-  - apiGroups:
-      - ""
-    resources:
-      - serviceaccounts
-    verbs:
-      - get
-      - create
-      - delete
       - patch
+  - apiGroups:
+      - snapshot.storage.k8s.io
+    resources:
+      - volumesnapshotclasses
+    verbs:
+      - create
+  - apiGroups:
+      - snapshot.storage.k8s.io
+    resources:
+      - volumesnapshots/status
+      - volumesnapshotcontents/status
+    verbs:
       - update
+      - patch
+  - apiGroups:
+      - snapshot.storage.k8s.io
+    resources:
+      - volumesnapshotcontents
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+      - update
+      - patch
+  - apiGroups:
+      - csi.storage.k8s.io
+    resources:
+      - csidrivers
+      - csinodeinfos
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+      - update
+      - patch
+  - apiGroups:
+      - storage.k8s.io
+    resources:
+      - csidrivers
+      - csinodes
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+      - update
+      - patch
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+      - update
+      - patch
   - apiGroups:
       - trident.netapp.io
     resources:
@@ -192,8 +233,8 @@ rules:
       - tridentactionsnapshotrestores/status
       - tridentprovisioners # Required for Tprov
       - tridentprovisioners/status # Required to update Tprov's status section
-      - tridentorchestrators # Required for torc
-      - tridentorchestrators/status # Required to update torc's status section
+      - tridentorchestrators # Required for Torc
+      - tridentorchestrators/status # Required to update Torc's status section
       - tridentconfigurators # Required for tconf
       - tridentconfigurators/status # Required to update tconf's status section
     verbs:
@@ -211,9 +252,7 @@ rules:
     verbs:
       - use
     resourceNames:
-      - trident-controller
-      - trident-node-linux
-      - trident-node-windows
+      - tridentpods
   # Now Operator specific permissions
   - apiGroups:
       - ""
@@ -338,9 +377,6 @@ rules:
       - podsecuritypolicies
     resourceNames:
       - tridentpods
-      - trident-controller
-      - trident-node-linux
-      - trident-node-windows
     verbs:
       - delete
       - update
@@ -373,11 +409,107 @@ rules:
     verbs:
       - use
     resourceNames:
+      - trident-controller
+      - trident-node-linux
+      - trident-node-windows
       - tridentoperatorpods
-  - apiGroups:
-      - apiextensions.k8s.io
-    resources:
-      - customresourcedefinitions
-    verbs:
-      - get
-``` 
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app: operator.trident.netapp.io
+  name: trident-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: trident-operator
+subjects:
+  - kind: ServiceAccount
+    name: trident-operator
+    namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: operator.trident.netapp.io
+  name: trident-operator
+  namespace: kube-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: operator.trident.netapp.io
+      name: trident-operator
+  template:
+    metadata:
+      labels:
+        app: operator.trident.netapp.io
+        name: trident-operator
+    spec:
+      containers:
+        - command:
+            - /trident-operator
+            - --log-level=debug
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OPERATOR_NAME
+              value: trident-operator
+          image: netapp/trident-operator:25.02.0
+          imagePullPolicy: IfNotPresent
+          name: trident-operator
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "40Mi"
+            limits:
+              cpu: "20m"
+              memory: "80Mi"
+          securityContext:
+            capabilities:
+              drop:
+                - all
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - arm64
+                      - amd64
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+      serviceAccountName: trident-operator
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentOrchestrator
+metadata:
+  name: trident
+spec:
+  namespace: kube-system
+  enableForceDetach: false
+  IPv6: false
+  k8sTimeout: 0
+  httpRequestTimeout: "90s"
+  silenceAutosupport: false
+  autosupportInsecure: false
+  logFormat: "text"
+  disableAuditLog: true
+  debug: false
+  imagePullSecrets: []
+  imagePullPolicy: IfNotPresent
+  windows: false
+  enableACP: false
+  enableAutoBackendConfig: true
+  iscsiSelfHealingInterval: "5m0s"
+  iscsiSelfHealingWaitTime: "7m0s"
