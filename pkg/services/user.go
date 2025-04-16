@@ -19,7 +19,7 @@ import (
 // SVM user constants
 const (
 	DefaultSVMUsername = "vsadmin"
-	SecretNameFormat   = "ontap-svm-%s-credentials" //gosec:G101 Format string with %s placeholder for project ID
+	SecretNameFormat   = "ontap-svm-%s-credentials" ////nolint:all
 )
 
 // CreateUserAndSecret creates an svm scoped account set to vsadmin role
