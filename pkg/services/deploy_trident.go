@@ -154,7 +154,7 @@ func ProcessBackendTemplates(
 			backendConfigYaml = strings.ReplaceAll(backendConfigYaml, "${PROJECT_ID}", projectId)
 		}
 
-		if err := os.WriteFile(backendConfigPath, []byte(backendConfigYaml), 0644); err != nil {
+		if err := os.WriteFile(backendConfigPath, []byte(backendConfigYaml), 0600); err != nil {
 			return fmt.Errorf("failed to write backend config file: %w", err)
 		}
 		log.Info("Updated backend config file with project values",

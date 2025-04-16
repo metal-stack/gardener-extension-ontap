@@ -62,7 +62,8 @@ func CreateSVM(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) (str
 		log.Error(err, "Failed to create SVM", "name", svmName)
 
 		// Check for specific error types
-		if apiErr, ok := err.(*s_vm.SvmCreateDefault); ok {
+		var apiErr *s_vm.SvmCreateDefault
+		if errors.As(err, &apiErr) {
 			log.Error(err, "API Error", "code", apiErr.Code(), "message", apiErr.Error())
 			if apiErr.GetPayload() != nil {
 				log.Error(err, "API Error Payload", "payload", fmt.Sprintf("%+v", apiErr.GetPayload()))
@@ -120,6 +121,7 @@ func SetupSVMNetworkInterfaces(log logr.Logger, ontapClient *ontapv1.Ontap, svmU
 	// Find available IPs for the SVM
 	dataLIF, managementLIF, err := FindAvailableIPs(log, ontapClient)
 	if err != nil {
+		return "", "", fmt.Errorf("failed to find available IPs: %w", err)
 	}
 
 	log.Info("Using network interfaces for SVM",

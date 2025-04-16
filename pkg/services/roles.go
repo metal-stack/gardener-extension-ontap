@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -32,7 +33,7 @@ func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, ontapClient *on
 
 	// Check if account exists
 	err = checkIfAccountExistsForSvm(log, ontapClient, username, svmName)
-	if err == nil || err == ErrAlreadyExists {
+	if err == nil || errors.Is(err, ErrAlreadyExists) {
 		log.Info("ONTAP user for SVM already exists", "username", username, "svm", svmName)
 		return nil
 	}
