@@ -39,6 +39,7 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 			if err != nil {
 				return fmt.Errorf("creating secret in seed failed: %w", err)
 			}
+			err = deployTridentSecretsInShootAsMR(ctx, log, projectId, shootNamespace, seedClient, secretName, DefaultSVMUsername, strfmt.Password(password))
 			return nil
 		}
 		return fmt.Errorf("error occured during creation of ontap user for svm %w", err)
@@ -122,7 +123,7 @@ func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient
 	return ErrSeedSecretMissing, ""
 }
 
-// very secure password
+// very secure password for now
 func GenerateSecurePassword() (string, error) {
 	return "123456789", nil
 }
