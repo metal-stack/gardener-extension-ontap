@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -9,6 +10,9 @@ import (
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	"github.com/metal-stack/ontap-go/api/models"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/metal-stack/gardener-extension-ontap/pkg/common"
 )
 
 var (
@@ -16,37 +20,39 @@ var (
 	ErrNotFound = errors.New("NotFound")
 	// ErrAlreadyExists is returned when the enitity already exists
 	ErrAlreadyExists = errors.New("AlreadyExists")
+
+	ErrSeedSecretMissing = errors.New("SeedSecretMissing")
 )
 
-// CreateSVM creates an SVM for the given user/project and returns the network interfaces
-func CreateSVM(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) (string, string, error) {
-	log.Info("Creating SVM", "name", svmName)
-
-	// First check if the SVM already exists to avoid duplicates
-	uuid, err := GetSVMByName(log, ontapClient, svmName)
-	if err == nil {
-		// SVM already exists,get network interfaces
-		//not prod ready
-		dataLif, managementLif, err := GetSVMNetworkInterfaces(log, ontapClient, uuid)
-		if err != nil {
-			log.Error(err, "Failed to get network interfaces for existing SVM", "name", svmName, "uuid", uuid)
-			return "", "", fmt.Errorf("failed to get network interfaces for existing SVM: %w", err)
-		}
-		log.Info("Using existing SVM interfaces", "dataLif", dataLif, "managementLif", managementLif)
-		return dataLif, managementLif, nil
-	} else if !errors.Is(err, ErrNotFound) {
-		// There was an error checking for the SVM
-		return "", "", fmt.Errorf("error checking if SVM exists: %w", err)
-	}
-
+// CreateSVM creates an SVM for the given user and or project and returns the network interfaces
+func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client, SvmIpaddresses common.SvmIpaddresses) error {
+	log.Info("Creating SVM with ips", "name", projectId, "managementLif", SvmIpaddresses.ManagementLif, "dataLif", SvmIpaddresses.DataLif)
 	// SVM does not exist, create it
 	params := s_vm.NewSvmCreateParams()
 	params.Info = &models.Svm{
-		Name: &svmName,
+		Name: &projectId,
 		Iscsi: &models.SvmInlineIscsi{
 			Allowed: pointer.Pointer(true),
 			Enabled: pointer.Pointer(true),
 		},
+
+		//Commented out for now till nvme license comes
+		// SvmInlineIPInterfaces: []*models.IPInterfaceSvm{
+		// 	{
+		// 		Name: pointer.Pointer(common.DataLifTag),
+		// 		IP: &models.IPInterfaceSvmInlineIP{
+		// 			Address: (*models.IPAddressReadcreate)(pointer.Pointer(addresses.DataLif)),
+		// 			Netmask: (*models.IPNetmaskCreateonly)(pointer.Pointer("255.255.255.0")),
+		// 		},
+		// 	},
+		// 	{
+		// 		Name: pointer.Pointer(common.ManagementLifTag),
+		// 		IP: &models.IPInterfaceSvmInlineIP{
+		// 			Address: (*models.IPAddressReadcreate)(pointer.Pointer(addresses.ManagementLif)),
+		// 			Netmask: (*models.IPNetmaskCreateonly)(pointer.Pointer("255.255.255.0")),
+		// 		},
+		// 	},
+		// },
 		// Need license for Simulator
 		// Add NVMe protocol when supported by your ONTAP version
 		// Nvme: &models.SvmInlineNvme{
@@ -55,89 +61,22 @@ func CreateSVM(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) (str
 		// },
 	}
 
-	log.Info("Sending SVM create request", "params", fmt.Sprintf("%+v", params))
-	resp, _, err := ontapClient.SVM.SvmCreate(params, nil)
+	log.Info("Sending SVM create request!", "params", fmt.Sprintf("%+v", params))
+	//Not doing anyhting with the response
+	_, _, err := ontapClient.SVM.SvmCreate(params, nil)
 	if err != nil {
-		// Log the detailed error
-		log.Error(err, "Failed to create SVM", "name", svmName)
-
-		// Check for specific error types
-		var apiErr *s_vm.SvmCreateDefault
-		if errors.As(err, &apiErr) {
-			log.Error(err, "API Error", "code", apiErr.Code(), "message", apiErr.Error())
-			if apiErr.GetPayload() != nil {
-				log.Error(err, "API Error Payload", "payload", fmt.Sprintf("%+v", apiErr.GetPayload()))
-			}
-		}
-		return "", "", fmt.Errorf("failed to create SVM: %w", err)
+		return fmt.Errorf("failed to create SVM: %w", err)
 	}
-
-	// The response might be nil or have a nil payload, but that's okay
-	if resp != nil && resp.Payload != nil {
-		log.Info("SVM creation response received",
-			"name", svmName,
-			"payload", fmt.Sprintf("%+v", resp.Payload))
-	} else {
-		log.Info("SVM creation initiated with empty response", "name", svmName)
+	log.Info("SVM created successfully", "name", projectId, "network Interfaces", SvmIpaddresses)
+	log.Info("Creating user and secret with network information",
+		"projectId", projectId,
+		"dataLif", SvmIpaddresses.DataLif,
+		"managementLif", SvmIpaddresses.ManagementLif)
+	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, shootNamespace, seedClient); err != nil {
+		return fmt.Errorf("failed to create user and secret: %w", err)
 	}
-
-	// Check if the SVM was actually created
-	uuid, err = GetSVMByName(log, ontapClient, svmName)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			log.Info("SVM not found immediately after creation request, will check on next reconciliation", "name", svmName)
-			return "", "", fmt.Errorf("SVM creation initiated but not yet available, retry later")
-		}
-		return "", "", fmt.Errorf("error checking if SVM was created: %w", err)
-	}
-	log.Info("SVM created successfully", "name", svmName, "uuid", uuid)
-
-	//not prod ready
-	dataLif, managementLif, err := SetupSVMNetworkInterfaces(log, ontapClient, uuid, svmName)
-	if err != nil {
-		log.Error(err, "Failed to set up network interfaces for SVM", "name", svmName, "uuid", uuid)
-
-		// In a production environment, this is a critical error - return it
-		return "", "", fmt.Errorf("SVM created but failed to configure network interfaces: %w", err)
-	}
-
-	log.Info("SVM network interfaces configured", "dataLif", dataLif, "managementLif", managementLif)
-	return dataLif, managementLif, nil
-}
-
-// not ready
-func FindAvailableIPs(log logr.Logger, ontapClient *ontapv1.Ontap) (string, string, error) {
-	log.Info("Looking for available IPs for SVM LIFs")
-	dataLIF := "192.168.1.100"
-	managementLIF := "192.168.1.101"
-
-	return dataLIF, managementLIF, nil
-}
-
-// not ready
-func SetupSVMNetworkInterfaces(log logr.Logger, ontapClient *ontapv1.Ontap, svmUUID string, svmName string) (string, string, error) {
-	log.Info("Setting up network interfaces for SVM", "name", svmName, "uuid", svmUUID)
-
-	// Find available IPs for the SVM
-	dataLIF, managementLIF, err := FindAvailableIPs(log, ontapClient)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to find available IPs: %w", err)
-	}
-
-	log.Info("Using network interfaces for SVM",
-		"dataLif", dataLIF,
-		"managementLif", managementLIF)
-
-	return dataLIF, managementLIF, nil
-}
-
-// not ready
-func GetSVMNetworkInterfaces(log logr.Logger, ontapClient *ontapv1.Ontap, svmUUID string) (string, string, error) {
-	log.Info("Getting network interfaces for SVM", "uuid", svmUUID)
-	dataLIF := "192.168.1.100"
-	managementLIF := "192.168.1.101"
-
-	return dataLIF, managementLIF, nil
+	log.Info("created user and secret for svm and secret for shoot and seed", "projectId", projectId)
+	return nil
 }
 
 func GetAllSVM(log logr.Logger, ontapClient *ontapv1.Ontap) error {
@@ -188,11 +127,6 @@ func GetSVMByName(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) (
 		return "", fmt.Errorf("failed to fetch SVMs: %w", err)
 	}
 
-	if svmGetOK == nil || svmGetOK.Payload == nil {
-		log.Info("No SVM data available.")
-		return "", ErrNotFound
-	}
-
 	log.Info("Checking for SVM with name", "name", svmName)
 
 	if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
@@ -206,7 +140,7 @@ func GetSVMByName(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) (
 				log.Info("Found SVM", "name", svmName, "uuid", *svm.UUID)
 				return *svm.UUID, nil
 			}
-			return "", fmt.Errorf("UUID not available for the SVM named %s", svmName)
+			return "", ErrNotFound
 		}
 	}
 

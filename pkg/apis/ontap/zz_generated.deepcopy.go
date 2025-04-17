@@ -37,11 +37,7 @@ func (in Protocols) DeepCopy() Protocols {
 func (in *TridentConfig) DeepCopyInto(out *TridentConfig) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
-	if in.Protocols != nil {
-		in, out := &in.Protocols, &out.Protocols
-		*out = make(Protocols, len(*in))
-		copy(*out, *in)
-	}
+	out.SvmIpaddresses = in.SvmIpaddresses
 	return
 }
 

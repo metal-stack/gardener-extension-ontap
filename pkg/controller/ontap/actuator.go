@@ -15,6 +15,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
+	"github.com/metal-stack/gardener-extension-ontap/pkg/common"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/services"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -115,7 +116,7 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
 		numSVMs = int(*result.Payload.NumRecords)
 	}
-	log.Info("Successfully connected to ONTAP. Found %d existing SVMs\n", numSVMs)
+	log.Info("Successfully connected to ONTAP. Found %w existing SVMs\n", numSVMs)
 
 	return ontap, nil
 }
@@ -157,15 +158,15 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
 	var projectTag tag.TagMap = shoot.Annotations
 	projectId, ok := projectTag.Value(tag.ClusterProject)
+	a.log.Info("Found project ID in shoot annotations", "projectId", projectId)
 	if !ok || projectId == "" {
 		return fmt.Errorf("no project ID found in shoot annotations")
 	}
-
+	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
-	a.log.Info("Found project ID in shoot annotations", "projectId", projectId)
 
-	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace)
-	dataLif, managementLif, err := a.ensureSvmForProject(ctx, a.ontap, projectId, a.shootNamespace)
+	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace, "ontapConfig", ontapConfig.SvmIpaddresses, "ontapConfigData", ontapConfig.SvmIpaddresses.DataLif)
+	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, a.shootNamespace)
 	if err != nil {
 		return err
 	}
@@ -184,7 +185,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 	// Process backend templates - needs the correct path relative to chartPath for service
 	a.log.Info("Processing backend templates", "path", backendPath)
-	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName, dataLif, managementLif); err != nil {
+	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName, ontapConfig.SvmIpaddresses.DataLif, ontapConfig.SvmIpaddresses.ManagementLif); err != nil {
 		return fmt.Errorf("failed to process backend templates: %w", err)
 	}
 
@@ -288,48 +289,20 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 // ensureSvmForProject creates an SVM for the project if it doesn't exist yet
-func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string) (string, string, error) {
-	uuid, err := services.GetSVMByName(a.log, ontapClient, projectId)
+func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, SvmIpaddresses common.SvmIpaddresses, projectId string, shootNamespace string) error {
+	_, err := services.GetSVMByName(a.log, ontapClient, projectId)
 	if err != nil {
 		if errors.Is(err, services.ErrNotFound) {
 			a.log.Info("No SVM found with project ID, creating new SVM", "projectId", projectId)
-
-			dataLif, managementLif, err := services.CreateSVM(a.log, ontapClient, projectId)
+			err := services.CreateSVM(ctx, a.log, ontapClient, projectId, a.shootNamespace, a.client, SvmIpaddresses)
 			if err != nil {
-				return "", "", fmt.Errorf("failed to create SVM or network interfaces: %w", err)
+				return fmt.Errorf("failed to create SVM or network interfaces: %w", err)
 			}
 
-			a.log.Info("SVM creation completed", "projectId", projectId, "dataLif", dataLif, "managementLif", managementLif)
-
-			a.log.Info("Creating user and secret with network information",
-				"projectId", projectId,
-				"dataLif", dataLif,
-				"managementLif", managementLif)
-
-			if err = services.CreateUserAndSecret(ctx, a.log, ontapClient, projectId, shootNamespace, a.client, dataLif, managementLif); err != nil {
-				return "", "", fmt.Errorf("failed to create user and secret: %w", err)
-			}
-
-			return dataLif, managementLif, nil
+			return nil
 		}
-		return "", "", fmt.Errorf("error getting SVM by name: %w", err)
+		return fmt.Errorf("error getting SVM by name: %w", err)
 	}
 
-	a.log.Info("SVM already exists", "projectId", projectId, "uuid", uuid)
-
-	dataLif, managementLif, err := services.GetSVMNetworkInterfaces(a.log, ontapClient, uuid)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get network interfaces for existing SVM: %w", err)
-	}
-
-	a.log.Info("Retrieved network interfaces for existing SVM",
-		"projectId", projectId,
-		"dataLif", dataLif,
-		"managementLif", managementLif)
-
-	if err = services.CreateUserAndSecret(ctx, a.log, ontapClient, projectId, shootNamespace, a.client, dataLif, managementLif); err != nil {
-		return "", "", fmt.Errorf("failed to create user and secret: %w", err)
-	}
-
-	return dataLif, managementLif, nil
+	return nil
 }

@@ -45,6 +45,7 @@ func AddToManager(ctx context.Context, mgr manager.Manager) error {
 // The opts.Reconciler is being set with a newly instantiated actuator.
 func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddOptions) error {
 
+	//CHANGE
 	opts.Config.AdminAuthSecretRef = "admin-access"
 	opts.Config.ClusterManagementIp = "test"
 	opts.Config.AuthSecretNamespace = "garden"

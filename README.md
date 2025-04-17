@@ -63,34 +63,109 @@ make push-to-gardener-local
 <img src="sequence_diagram.drawio.svg">
 
 
+## Trident Permission for the SVM
+
+https://github.com/NetAppDocs/trident/blob/main/trident-use/ontap-nas.adoc#user-permissions
+
+The docs say that the triden operator needs the default vsadmin role for the svm.
+
 # Notes
 
 doc.go has been temporarily modified to bypass the use of VERSION. This needs to be fixed.
 
-./hack/usage/delete shoot local  garden-local # Deleting shoot cluster
-
 
 kubectl -n garden-<project-name> annotate shoot <shoot-name> gardener.cloud/operation=reconcile
 
+## Gardener Notes
 
-Still a bug:
+### Access the shoot
 
-    Message:               error during apply of object "v1/ServiceAccount/trident/trident-operator": unable to get: trident/trident-operator because of unknown namespace for the cache
+Before fetching the kubeconfig we need to adjust our /etc/hosts.
 
-make fetch virtuail k in metal deployment im controlplane directory, damit ich k create -k example/ für die ontap extension mache
+```bash
+cat <<EOF | sudo tee -a /etc/hosts
 
+# Begin of Gardener local setup section
+# Shoot API server domains
+172.18.255.1 api.local.local.external.local.gardener.cloud
+172.18.255.1 api.local.local.internal.local.gardener.cloud
 
+# Ingress
+172.18.255.1 p-seed.ingress.local.seed.local.gardener.cloud
+172.18.255.1 g-seed.ingress.local.seed.local.gardener.cloud
+172.18.255.1 gu-local--local.ingress.local.seed.local.gardener.cloud
+172.18.255.1 p-local--local.ingress.local.seed.local.gardener.cloud
+172.18.255.1 v-local--local.ingress.local.seed.local.gardener.cloud
+
+# E2E tests
+172.18.255.1 api.e2e-managedseed.garden.external.local.gardener.cloud
+172.18.255.1 api.e2e-managedseed.garden.internal.local.gardener.cloud
+172.18.255.1 api.e2e-hib.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-hib.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-hib-wl.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-hib-wl.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-unpriv.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-unpriv.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-wake-up.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-wake-up.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-wake-up-wl.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-wake-up-wl.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-wake-up-ncp.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-wake-up-ncp.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-migrate.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-migrate.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-migrate-wl.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-migrate-wl.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-mgr-hib.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-mgr-hib.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-rotate.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-rotate.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-rotate-wl.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-rotate-wl.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-rot-noroll.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-rot-noroll.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-default.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-default.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-default-wl.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-default-wl.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-force-delete.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-force-delete.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-fd-hib.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-fd-hib.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-upd-node.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-upd-node.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-upd-node-wl.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-upd-node-wl.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-upgrade.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-upgrade.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-upgrade-wl.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-upgrade-wl.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-upg-hib.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-upg-hib.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-upg-hib-wl.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-upg-hib-wl.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-auth-one.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-auth-one.local.internal.local.gardener.cloud
+172.18.255.1 api.e2e-auth-two.local.external.local.gardener.cloud
+172.18.255.1 api.e2e-auth-two.local.internal.local.gardener.cloud
+172.18.255.1 gu-local--e2e-rotate.ingress.local.seed.local.gardener.cloud
+172.18.255.1 gu-local--e2e-rotate-wl.ingress.local.seed.local.gardener.cloud
+172.18.255.1 gu-local--e2e-rot-noroll.ingress.local.seed.local.gardener.cloud
+# End of Gardener local setup section
+EOF
+```
+
+In the gardener repo for the shoot kubeconfig run:
 
 ./hack/usage/generate-admin-kubeconf.sh > admin-kubeconf.yaml
 
+## Ontap Notes:
 
 # For data LIF
 network interface create -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -lif data_lif -address 192.168.10.40 -netmask 255.255.255.0 -home-node fsqe-snc1-01 -home-port e0b -status-admin up
 
 # For management LIF
 network interface create -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -lif mgmt_lif -address 192.168.10.41 -netmask 255.255.255.0 -home-node fsqe-snc1-01 -home-port e0b -firewall-policy mgmt -status-admin up
-
-
 
 apiVersion: trident.netapp.io/v1
 kind: TridentBackendConfig

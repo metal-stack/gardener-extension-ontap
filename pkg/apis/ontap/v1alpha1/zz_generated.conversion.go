@@ -10,8 +10,6 @@
 package v1alpha1
 
 import (
-	unsafe "unsafe"
-
 	ontap "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap"
 	conversion "k8s.io/apimachinery/pkg/conversion"
 	runtime "k8s.io/apimachinery/pkg/runtime"
@@ -38,11 +36,7 @@ func RegisterConversions(s *runtime.Scheme) error {
 }
 
 func autoConvert_v1alpha1_TridentConfig_To_ontap_TridentConfig(in *TridentConfig, out *ontap.TridentConfig, s conversion.Scope) error {
-	out.SVMName = in.SVMName
-	out.Protocols = *(*ontap.Protocols)(unsafe.Pointer(&in.Protocols))
-	out.SVMSecretRef = in.SVMSecretRef
-	out.DataLif = in.DataLif
-	out.ManagementLif = in.ManagementLif
+	out.SvmIpaddresses = in.SvmIpaddresses
 	return nil
 }
 
@@ -52,11 +46,7 @@ func Convert_v1alpha1_TridentConfig_To_ontap_TridentConfig(in *TridentConfig, ou
 }
 
 func autoConvert_ontap_TridentConfig_To_v1alpha1_TridentConfig(in *ontap.TridentConfig, out *TridentConfig, s conversion.Scope) error {
-	out.SVMName = in.SVMName
-	out.Protocols = *(*Protocols)(unsafe.Pointer(&in.Protocols))
-	out.SVMSecretRef = in.SVMSecretRef
-	out.DataLif = in.DataLif
-	out.ManagementLif = in.ManagementLif
+	out.SvmIpaddresses = in.SvmIpaddresses
 	return nil
 }
 

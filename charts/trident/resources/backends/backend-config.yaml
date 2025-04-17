@@ -9,7 +9,6 @@ spec:
   storageDriverName: ontap-nas
   managementLIF: ${MANAGEMENT_LIF}
   dataLIF: ${DATA_LIF}
-  svm: ${PROJECT_ID}
+  svm: vs1
   credentials:
-    name: ontap-${PROJECT_ID}-credentials
-    namespace: kube-system 
+    name: ontap-svm-${PROJECT_ID}-credentials

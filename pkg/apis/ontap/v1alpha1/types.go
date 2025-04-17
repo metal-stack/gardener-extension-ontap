@@ -3,6 +3,8 @@ package v1alpha1
 import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/metal-stack/gardener-extension-ontap/pkg/common"
 )
 
 const (
@@ -16,20 +18,8 @@ const (
 type TridentConfig struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// SVMName is the name of the storage virtual machine, can be a hostname or a ip address.
-	SVMName string `json:"svmName,omitempty"`
-
-	// Protocols to use to mount the volume, only NVMe is used for now.
-	Protocols Protocols `json:"protocols,omitempty"`
-
-	// SvmSecretRef references to the secret which contains the auth credentials and the lif ips to connect to the svm
-	SVMSecretRef string `json:"svmSecretRef,omitempty"`
-
-	// DataLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
-	DataLif string `json:"dataLif,omitempty"`
-
-	// ManagementLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
-	ManagementLif string `json:"managementLif,omitempty"`
+	//SvmIpAdresses are the endpoints needed by the
+	SvmIpaddresses common.SvmIpaddresses `json:"svmIpaddresses,omitempty"`
 }
 type Protocols []Protocol
 type Protocol string
@@ -46,12 +36,6 @@ func (config *TridentConfig) IsValid(log logr.Logger) bool {
 }
 
 func (config *TridentConfig) ConfigureDefaults(svmName *string, svmSecretRef *string) error {
-	if config.SVMName == "" && svmName != nil {
-		config.SVMName = *svmName
-	}
-	if config.SVMSecretRef == "" && svmSecretRef != nil {
-		config.SVMSecretRef = *svmSecretRef
-	}
 
 	// if config.Protocols == nil || len(config.Protocols) == 0 {
 	// 	if defaultProtocols != nil {

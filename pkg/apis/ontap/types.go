@@ -1,6 +1,7 @@
 package ontap
 
 import (
+	"github.com/metal-stack/gardener-extension-ontap/pkg/common"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -11,44 +12,9 @@ import (
 type TridentConfig struct {
 	metav1.TypeMeta
 
-	// SVMName is the name of the storage virtual machine, can be a hostname or a ip address.
-	SVMName string
-
-	// Protocols to use to mount the volume, only NVMe is used for now.
-	Protocols Protocols
-
-	// SvmSecretRef references to the secret which contains the auth credentials and the lif ips to connect to the svm
-	SVMSecretRef string
-
-	// DataLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
-	DataLif string
-
-	// ManagementLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
-	ManagementLif string
+	// SvmIpaddresses are the ip adresses provided for the svm to create and/or call the endpoint
+	SvmIpaddresses common.SvmIpaddresses
 }
 
 type Protocols []Protocol
 type Protocol string
-
-// # Auto generated ANF backend related fields consumed by the configurator controller.
-// anfConfigurator:
-//   enabled: false
-//   virtualNetwork: ""
-//   subnet: ""
-//   subscriptionID: ""
-//   tenantID: ""
-//   location: ""
-//   clientCredentials: ""
-//   capacityPools: []
-//   netappAccounts: []
-//   resourceGroups: []
-//   customerEncryptionKeys: {}
-
-// # Auto generated ONTAP backend related fields consumed by the configurator controller.
-// ontapConfigurator:
-//   enabled: false
-//   svms:
-//     - fsxnID: ''
-//       svmName: ''
-//       protocols: []
-//       authType: ''
