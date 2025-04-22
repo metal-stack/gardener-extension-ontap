@@ -30,39 +30,24 @@ func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	// Check if the base directory exists
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		// If the directory doesn't exist, return an empty map and no error,
-		// as it might be valid (e.g., no CRDs to load)
 		fmt.Printf("Directory does not exist, returning empty map: %s\n", dirPath)
 		return result, nil
 	}
-
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err // Propagate errors (e.g., permission issues)
 		}
-		// Skip directories entirely
 		if info.IsDir() {
-			// Skip the root directory itself from being processed as a file
 			if path == dirPath {
 				return nil
 			}
-			// We are not processing subdirectories in the current calls, but if we were,
-			// filepath.SkipDir could be used here if needed based on some condition.
-			// For now, just continue walking.
 			return nil
 		}
-
-		// Process only YAML files
 		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml") {
-			return nil
-		}
-		// Skip kustomization files
-		if strings.HasSuffix(path, "kustomization.yaml") {
 			return nil
 		}
 		relPath, err := filepath.Rel(dirPath, path)
 		if err != nil {
-			// Should generally not happen if walk starts correctly, but handle defensively
 			return fmt.Errorf("failed to get relative path for %s: %w", path, err)
 		}
 		data, err := os.ReadFile(path)
@@ -76,7 +61,6 @@ func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error walking %s: %w", dirPath, err)
 	}
-	// It's okay to return an empty map if no YAML files were found
 	if len(result) == 0 {
 		fmt.Printf("No YAML files found in: %s\n", dirPath)
 	}

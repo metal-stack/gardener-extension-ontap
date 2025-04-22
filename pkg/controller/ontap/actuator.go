@@ -39,8 +39,8 @@ import (
 const (
 	//Why hardcod
 	tridentCRDsName   string = "trident-crds"
-	tridentRbacMR     string = "extension-ontap-trident-rbac"
-	tridentBackendsMR string = "extension-ontap-trident-backends"
+	tridentRbacMR     string = "trident-rbac"
+	tridentBackendsMR string = "trident-backends"
 )
 
 // NewActuator returns an actuator responsible for Extension resources.
@@ -206,8 +206,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 			return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
 		}
 		a.log.Info("Trident CRDs managed resource is ready", "name", tridentCRDsName)
-	} else {
-		a.log.Info("No CRDs found to deploy", "path", crdPath)
 	}
 
 	// 2. Load and Deploy RBAC Resources (NO exclusions needed anymore)
@@ -224,8 +222,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 			return fmt.Errorf("failed to create managed resources for Trident RBAC: %w", err)
 		}
 		a.log.Info("Trident RBAC managed resource deployment initiated", "name", tridentRbacMR)
-	} else {
-		a.log.Info("No RBAC resources found to deploy", "path", rbacPath)
 	}
 
 	// 3. Load and Deploy Backend Resources
@@ -241,8 +237,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 			return fmt.Errorf("failed to create managed resources for Trident Backends: %w", err)
 		}
 		a.log.Info("Trident Backends managed resource deployment initiated", "name", tridentBackendsMR)
-	} else {
-		a.log.Info("No Backend resources found to deploy", "path", backendPath)
 	}
 
 	a.log.Info("ONTAP extension reconciliation completed successfully")
@@ -251,25 +245,25 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 // Delete the Extension resource.
 func (a *actuator) Delete(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
-	if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentBackendsMR, false); err != nil {
-		return err
-	}
-	if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentBackendsMR); err != nil {
-		return err
-	}
-	if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentRbacMR, false); err != nil {
-		return err
-	}
-	if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentRbacMR); err != nil {
-		return err
-	}
-	if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentCRDsName, false); err != nil {
-		return err
-	}
-	if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentCRDsName); err != nil {
-		return err
-	}
-	log.Info("ManagedResource for Trident operator successfully deleted.")
+	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentBackendsMR, false); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentBackendsMR); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentRbacMR, false); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentRbacMR); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentCRDsName, false); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentCRDsName); err != nil {
+	// 	return err
+	// }
+	// log.Info("ManagedResource for Trident operator successfully deleted.")
 	return nil
 }
 

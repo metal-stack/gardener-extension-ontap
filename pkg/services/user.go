@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gardener/gardener/pkg/client/kubernetes"
 	"github.com/gardener/gardener/pkg/utils/managedresources"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-openapi/strfmt"
 	"github.com/metal-stack/ontap-go/api/client/security"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -33,7 +35,8 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 	err, password := CreateONTAPUserForSVM(ctx, log, seedClient, ontapClient, DefaultSVMUsername, projectId, shootNamespace)
 	// If the secret doesn't exist in the seed that means, this is the first shoot therefore we need to create it.
 	if err != nil {
-		if !errors.Is(err, ErrAlreadyExists) {
+		if errors.Is(err, ErrSeedSecretMissing) {
+			log.Info("seed Secret missing for first shoot, creating...")
 			tridentSecret := buildSecret(secretName, DefaultSVMUsername, string(password), projectId, shootNamespace)
 			err := seedClient.Create(ctx, tridentSecret)
 			if err != nil {
@@ -67,11 +70,28 @@ func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient clie
 	if errors.Is(err, ErrAlreadyExists) && password != "" {
 		return ErrAlreadyExists, password
 	}
-	// Fetch svm to create user for
-	svmUUID, err := GetSVMByName(log, ontapClient, svmName)
-	if err != nil {
-		return fmt.Errorf("failed to get SVM UUID: %w", err), ""
+
+	// Fetch svm to create user for, retry a few times if not found initially
+	// Important to do this otherwise sometimes the ontap api is not ready/hasn't finished creating the svm
+	var svmUUID string
+	maxRetries := 3
+	retryDelay := 5 * time.Second
+	for i := 0; i < maxRetries; i++ {
+		log.Info("Trying to get svm after creation %w", i)
+		svmUUID, err = GetSVMByName(log, ontapClient, svmName)
+		if err == nil {
+			break // Found SVM, exit loop
+		}
+		log.Error(err, "Failed to get SVM UUID, retrying...", "svmName", svmName, "attempt", i+1)
+		if i < maxRetries-1 {
+			time.Sleep(retryDelay)
+		}
 	}
+	// If SVM still not found after retries, return error
+	if err != nil {
+		return fmt.Errorf("failed to get SVM UUID after %d attempts: %w", maxRetries, err), ""
+	}
+
 	// Create user with the built-in vsadmin role
 	application := "http"
 	authMethod := "password"
@@ -106,20 +126,26 @@ func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient clie
 	return ErrSeedSecretMissing, password
 }
 
-// ListAllUser lists all security users with their owners i.e. smv or cluster
 func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap, accountName string, svmName string, shootNamespace string) (error, string) {
 	// Check if secret exists in the shootNamespace
 	secretName := fmt.Sprintf(SecretNameFormat, svmName)
 	existingSecret := &corev1.Secret{}
 	err := seedClient.Get(ctx, client.ObjectKey{Namespace: shootNamespace, Name: secretName}, existingSecret)
-	if err == nil {
-		log.Info("Secret already exists for SVM", "secretName", secretName, "namespace", shootNamespace)
-		if password, ok := existingSecret.Data["password"]; ok {
-			// Return existing password to be reused
-			return ErrAlreadyExists, string(password)
+	if err != nil {
+		// If secret is missing in seed
+		if apierrors.IsNotFound(err) {
+			log.Info("Secret not found in seed", "secretName", secretName, "namespace", shootNamespace)
+			return ErrSeedSecretMissing, ""
 		}
+		log.Error(err, "Failed to get secret from seed", "secretName", secretName, "namespace", shootNamespace)
+		return fmt.Errorf("failed to get secret %s from namespace %s: %w", secretName, shootNamespace, err), ""
 	}
-	log.Info("Secret does not exist for SVM", "secretName", secretName, "namespace", shootNamespace)
+	// Secret exists, check if password field is present and not empty
+	if password, ok := existingSecret.Data["password"]; ok && len(password) > 0 {
+		log.Info("Secret exists and contains a password", "secretName", secretName, "namespace", shootNamespace)
+		return ErrAlreadyExists, string(password)
+	}
+	log.Info("Secret exists but password field is missing or empty, considering it missing", "secretName", secretName, "namespace", shootNamespace)
 	return ErrSeedSecretMissing, ""
 }
 
