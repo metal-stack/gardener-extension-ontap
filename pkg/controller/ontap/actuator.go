@@ -22,7 +22,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
-	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
 	corev1 "k8s.io/api/core/v1"
@@ -100,17 +99,17 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		return nil, fmt.Errorf("failed to create ONTAP API client: %w", err)
 	}
 
-	params := s_vm.NewSvmCollectionGetParams()
-	result, err := ontap.SVM.SvmCollectionGet(params, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
-	}
+	// params := s_vm.NewSvmCollectionGetParams()
+	// result, err := ontap.SVM.SvmCollectionGet(params, nil)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
+	// }
 
-	numSVMs := 0
-	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
-		numSVMs = int(*result.Payload.NumRecords)
-	}
-	log.Info("Successfully connected to ONTAP. Found %w existing SVMs\n", numSVMs)
+	// numSVMs := 0
+	// if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
+	// 	numSVMs = int(*result.Payload.NumRecords)
+	// }
+	// log.Info("Successfully connected to ONTAP. Found %w existing SVMs\n", numSVMs)
 
 	return ontap, nil
 }
