@@ -1,0 +1,42 @@
+{
+  "name": "b5f26a3b9a4d48dba6b3d1dd4ac4abec",
+  "ipspace": {
+    "name": "Default"
+  },
+  "is_space_reporting_logical": true,
+  "is_space_enforcement_logical": true,
+  "ip_interfaces": [
+    {
+      "name": "data_lif",
+      "ip": {
+        "address": "192.168.10.30",
+        "netmask": "255.255.255.252"
+      },
+      "location": {
+        "broadcast_domain": {
+          "uuid": "7aee71fd-2400-11f0-9d86-57f2c79cc881"
+         
+        }
+      },
+      "service_policy": "default-data-nvme-tcp" 
+    },
+    {
+      "name": "management_lif",
+      "ip": {
+        "address": "192.168.10.29",
+        "netmask": "255.255.255.252"
+      },
+      "location": {
+        "broadcast_domain": {
+          "uuid": "7aee71fd-2400-11f0-9d86-57f2c79cc881"
+        
+        }
+      },
+      "service_policy": "default-management" 
+    }
+  ],
+  "nvme": {
+    "enabled": true,
+    "allowed": true
+  }
+}

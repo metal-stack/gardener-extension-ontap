@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/metal-lib/pkg/pointer"
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
+	"github.com/metal-stack/ontap-go/api/client/networking"
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,46 +25,86 @@ var (
 	ErrSeedSecretMissing = errors.New("SeedSecretMissing")
 )
 
+// GetBroadcastDomainUUIDByName fetches the UUID of a broadcast domain given its name.
+func GetBroadcastDomainUUIDByName(log logr.Logger, ontapClient *ontapv1.Ontap, domainName string) (string, error) {
+	log.Info("fetching broadcast domain UUID by name", "name", domainName)
+
+	params := networking.NewNetworkEthernetBroadcastDomainsGetParams()
+	params.Name = &domainName
+
+	result, err := ontapClient.Networking.NetworkEthernetBroadcastDomainsGet(params, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch broadcast domains: %w", err)
+	}
+
+	if result.Payload == nil || result.Payload.NumRecords == nil || *result.Payload.NumRecords == 0 || len(result.Payload.BroadcastDomainResponseInlineRecords) == 0 {
+		log.Error(fmt.Errorf("broadcast domain not found"), "Broadcast domain not found", "name", domainName)
+		return "", ErrNotFound
+	}
+
+	for _, record := range result.Payload.BroadcastDomainResponseInlineRecords {
+		if record.Name != nil && *record.Name == domainName {
+			if record.UUID == nil {
+				return "", fmt.Errorf("found broadcast domain '%s' but it has no UUID", domainName)
+			}
+			log.Info("Found broadcast domain", "name", domainName, "uuid", *record.UUID)
+			return *record.UUID, nil
+		}
+	}
+	log.Error(fmt.Errorf("broadcast domain not found after checking records"), "Broadcast domain not found", "name", domainName)
+	return "", ErrNotFound
+}
+
 // CreateSVM creates an SVM for the given user and or project and returns the network interfaces
 func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client, SvmIpaddresses common.SvmIpaddresses) error {
 	log.Info("Creating SVM with ips", "name", projectId, "managementLif", SvmIpaddresses.ManagementLif, "dataLif", SvmIpaddresses.DataLif)
-	// SVM does not exist, create it
+
+	defaultBroadcastDomainName := "Default"
+	broadcastDomainUUID, err := GetBroadcastDomainUUIDByName(log, ontapClient, defaultBroadcastDomainName)
+	if err != nil {
+		return fmt.Errorf("failed to get broadcast domain UUID for '%s': %w", defaultBroadcastDomainName, err)
+	}
+
 	params := s_vm.NewSvmCreateParams()
 	params.Info = &models.Svm{
 		Name: &projectId,
-		Iscsi: &models.SvmInlineIscsi{
-			Allowed: pointer.Pointer(true),
-			Enabled: pointer.Pointer(true),
+		SvmInlineIPInterfaces: []*models.IPInterfaceSvm{
+			{
+				Name: pointer.Pointer(common.DataLifTag),
+				IP: &models.IPInterfaceSvmInlineIP{
+					Address: (*models.IPAddressReadcreate)(pointer.Pointer(SvmIpaddresses.DataLif)),
+					Netmask: (*models.IPNetmaskCreateonly)(pointer.Pointer("30")),
+				},
+				Location: &models.IPInterfaceSvmInlineLocation{
+					BroadcastDomain: &models.IPInterfaceSvmInlineLocationInlineBroadcastDomain{
+						UUID: pointer.Pointer(broadcastDomainUUID),
+					},
+				},
+				ServicePolicy: models.NewIPServicePolicySvmEnum(models.IPServicePolicySvmEnumDefaultDashDataDashNvmeDashTCP),
+			},
+			{
+				Name: pointer.Pointer(common.ManagementLifTag),
+				IP: &models.IPInterfaceSvmInlineIP{
+					Address: (*models.IPAddressReadcreate)(pointer.Pointer(SvmIpaddresses.ManagementLif)),
+					Netmask: (*models.IPNetmaskCreateonly)(pointer.Pointer("30")),
+				},
+				Location: &models.IPInterfaceSvmInlineLocation{
+					BroadcastDomain: &models.IPInterfaceSvmInlineLocationInlineBroadcastDomain{
+						UUID: pointer.Pointer(broadcastDomainUUID),
+					},
+				},
+				ServicePolicy: models.NewIPServicePolicySvmEnum(models.IPServicePolicySvmEnumDefaultDashManagement),
+			},
 		},
-
-		//Commented out for now till nvme license comes
-		// SvmInlineIPInterfaces: []*models.IPInterfaceSvm{
-		// 	{
-		// 		Name: pointer.Pointer(common.DataLifTag),
-		// 		IP: &models.IPInterfaceSvmInlineIP{
-		// 			Address: (*models.IPAddressReadcreate)(pointer.Pointer(addresses.DataLif)),
-		// 			Netmask: (*models.IPNetmaskCreateonly)(pointer.Pointer("255.255.255.0")),
-		// 		},
-		// 	},
-		// 	{
-		// 		Name: pointer.Pointer(common.ManagementLifTag),
-		// 		IP: &models.IPInterfaceSvmInlineIP{
-		// 			Address: (*models.IPAddressReadcreate)(pointer.Pointer(addresses.ManagementLif)),
-		// 			Netmask: (*models.IPNetmaskCreateonly)(pointer.Pointer("255.255.255.0")),
-		// 		},
-		// 	},
-		// },
-		// Need license for Simulator
-		// Add NVMe protocol when supported by your ONTAP version
-		// Nvme: &models.SvmInlineNvme{
-		//     Enabled: pointer.Pointer(true),
-		//     Allowed: pointer.Pointer(true),
-		// },
+		Nvme: &models.SvmInlineNvme{
+			Enabled: pointer.Pointer(true),
+			Allowed: pointer.Pointer(true),
+		},
 	}
 
 	log.Info("Sending SVM create request!", "params", fmt.Sprintf("%+v", params))
 	//Not doing anyhting with the response
-	_, _, err := ontapClient.SVM.SvmCreate(params, nil)
+	_, _, err = ontapClient.SVM.SvmCreate(params, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create SVM: %w", err)
 	}

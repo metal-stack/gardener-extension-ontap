@@ -19,8 +19,8 @@ spec:
       apiVersion: ontap.metal.extensions.gardener.cloud/v1alpha1
       kind: TridentConfig
       svmIpaddresses:
-        managementLif: "192.168.0.1" 
-        dataLif: "192.168.0.2"   
+        managementLif: 192.168.10.29 
+        dataLif: 192.168.10.30
   networking:
     type: calico
     nodes: 10.10.0.0/16
