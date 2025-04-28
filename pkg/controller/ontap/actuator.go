@@ -4,17 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
-	"github.com/gardener/gardener/pkg/utils/managedresources"
 
 	"github.com/gardener/gardener/pkg/apis/core/install"
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
-	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/common"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/services"
 
@@ -29,8 +25,6 @@ import (
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
-	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
-	"github.com/metal-stack/metal-lib/pkg/tag"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -132,114 +126,114 @@ type actuator struct {
 
 // Reconcile handles extension creation and updates.
 func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
-	a.shootNamespace = ex.Namespace
-	ontapConfig := &v1alpha1.TridentConfig{}
-	if ex.Spec.ProviderConfig != nil {
-		_, _, err := a.decoder.Decode(ex.Spec.ProviderConfig.Raw, nil, ontapConfig)
-		if err != nil {
-			return fmt.Errorf("failed to decode provider config: %w", err)
-		}
-	}
+	// a.shootNamespace = ex.Namespace
+	// ontapConfig := &v1alpha1.TridentConfig{}
+	// if ex.Spec.ProviderConfig != nil {
+	// 	_, _, err := a.decoder.Decode(ex.Spec.ProviderConfig.Raw, nil, ontapConfig)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to decode provider config: %w", err)
+	// 	}
+	// }
 
-	cluster := &extensionsv1alpha1.Cluster{}
-	if err := a.client.Get(ctx, client.ObjectKey{Name: ex.Namespace}, cluster); err != nil {
-		return fmt.Errorf("failed to get cluster object: %w", err)
-	}
+	// cluster := &extensionsv1alpha1.Cluster{}
+	// if err := a.client.Get(ctx, client.ObjectKey{Name: ex.Namespace}, cluster); err != nil {
+	// 	return fmt.Errorf("failed to get cluster object: %w", err)
+	// }
 
-	shoot := &gardencorev1beta1.Shoot{}
-	if cluster.Spec.Shoot.Raw != nil {
-		if _, _, err := a.decoder.Decode(cluster.Spec.Shoot.Raw, nil, shoot); err != nil {
-			log.Error(err, "failed to decode shoot, continuing with partial shoot object")
-		}
-	} else {
-		return fmt.Errorf("shoot spec in cluster resource is empty")
-	}
+	// shoot := &gardencorev1beta1.Shoot{}
+	// if cluster.Spec.Shoot.Raw != nil {
+	// 	if _, _, err := a.decoder.Decode(cluster.Spec.Shoot.Raw, nil, shoot); err != nil {
+	// 		log.Error(err, "failed to decode shoot, continuing with partial shoot object")
+	// 	}
+	// } else {
+	// 	return fmt.Errorf("shoot spec in cluster resource is empty")
+	// }
 
-	a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
-	var projectTag tag.TagMap = shoot.Annotations
-	projectId, ok := projectTag.Value(tag.ClusterProject)
-	a.log.Info("Found project ID in shoot annotations", "projectId", projectId)
-	if !ok || projectId == "" {
-		return fmt.Errorf("no project ID found in shoot annotations")
-	}
-	// Project id "-" to be replaced, ontap doesn't like "-"
-	projectId = strings.ReplaceAll(projectId, "-", "")
+	// a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
+	// var projectTag tag.TagMap = shoot.Annotations
+	// projectId, ok := projectTag.Value(tag.ClusterProject)
+	// a.log.Info("Found project ID in shoot annotations", "projectId", projectId)
+	// if !ok || projectId == "" {
+	// 	return fmt.Errorf("no project ID found in shoot annotations")
+	// }
+	// // Project id "-" to be replaced, ontap doesn't like "-"
+	// projectId = strings.ReplaceAll(projectId, "-", "")
 
-	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace, "ontapConfig", ontapConfig.SvmIpaddresses, "ontapConfigData", ontapConfig.SvmIpaddresses.DataLif)
-	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, a.shootNamespace)
-	if err != nil {
-		return err
-	}
+	// a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace, "ontapConfig", ontapConfig.SvmIpaddresses, "ontapConfigData", ontapConfig.SvmIpaddresses.DataLif)
+	// err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, a.shootNamespace)
+	// if err != nil {
+	// 	return err
+	// }
 
-	secretName := fmt.Sprintf(services.SecretNameFormat, projectId)
-	a.log.Info("Using credentials from secret in shoot cluster",
-		"secretName", secretName,
-		"namespace", "kube-system")
+	// secretName := fmt.Sprintf(services.SecretNameFormat, projectId)
+	// a.log.Info("Using credentials from secret in shoot cluster",
+	// 	"secretName", secretName,
+	// 	"namespace", "kube-system")
 
-	// Define base paths correctly based on the actual structure
-	chartPath := services.DefaultChartPath                  // "charts/trident"
-	resourcesPath := filepath.Join(chartPath, "resources")  // "charts/trident/resources"
-	rbacPath := filepath.Join(resourcesPath, "rbac")        // "charts/trident/resources/rbac"
-	crdPath := filepath.Join(resourcesPath, "crds")         // "charts/trident/resources/crds"
-	backendPath := filepath.Join(resourcesPath, "backends") // "charts/trident/resources/backends"
+	// // Define base paths correctly based on the actual structure
+	// chartPath := services.DefaultChartPath                  // "charts/trident"
+	// resourcesPath := filepath.Join(chartPath, "resources")  // "charts/trident/resources"
+	// rbacPath := filepath.Join(resourcesPath, "rbac")        // "charts/trident/resources/rbac"
+	// crdPath := filepath.Join(resourcesPath, "crds")         // "charts/trident/resources/crds"
+	// backendPath := filepath.Join(resourcesPath, "backends") // "charts/trident/resources/backends"
 
-	// Process backend templates - needs the correct path relative to chartPath for service
-	a.log.Info("Processing backend templates", "path", backendPath)
-	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName, ontapConfig.SvmIpaddresses.DataLif, ontapConfig.SvmIpaddresses.ManagementLif); err != nil {
-		return fmt.Errorf("failed to process backend templates: %w", err)
-	}
+	// // Process backend templates - needs the correct path relative to chartPath for service
+	// a.log.Info("Processing backend templates", "path", backendPath)
+	// if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName, ontapConfig.SvmIpaddresses.DataLif, ontapConfig.SvmIpaddresses.ManagementLif); err != nil {
+	// 	return fmt.Errorf("failed to process backend templates: %w", err)
+	// }
 
-	// 1. Load and Deploy CRDs
-	a.log.Info("Loading Trident CRDs", "path", crdPath)
-	crdYamls, err := services.LoadYAMLFiles(crdPath) // Load only from the correct crdPath
-	if err != nil {
-		return fmt.Errorf("failed to load Trident CRDs from %s: %w", crdPath, err)
-	}
-	if len(crdYamls) > 0 {
-		a.log.Info("Deploying Trident CRDs managed resource", "namespace", a.shootNamespace, "name", tridentCRDsName)
-		if err := services.DeployResources(ctx, a.client, a.shootNamespace, tridentCRDsName, crdYamls); err != nil {
-			return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
-		}
-		// Wait for CRD Managed Resource to be Ready
-		a.log.Info("Waiting for Trident CRDs managed resource to be ready", "name", tridentCRDsName)
-		if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentCRDsName); err != nil {
-			return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
-		}
-		a.log.Info("Trident CRDs managed resource is ready", "name", tridentCRDsName)
-	}
+	// // 1. Load and Deploy CRDs
+	// a.log.Info("Loading Trident CRDs", "path", crdPath)
+	// crdYamls, err := services.LoadYAMLFiles(crdPath) // Load only from the correct crdPath
+	// if err != nil {
+	// 	return fmt.Errorf("failed to load Trident CRDs from %s: %w", crdPath, err)
+	// }
+	// if len(crdYamls) > 0 {
+	// 	a.log.Info("Deploying Trident CRDs managed resource", "namespace", a.shootNamespace, "name", tridentCRDsName)
+	// 	if err := services.DeployResources(ctx, a.client, a.shootNamespace, tridentCRDsName, crdYamls); err != nil {
+	// 		return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
+	// 	}
+	// 	// Wait for CRD Managed Resource to be Ready
+	// 	a.log.Info("Waiting for Trident CRDs managed resource to be ready", "name", tridentCRDsName)
+	// 	if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentCRDsName); err != nil {
+	// 		return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
+	// 	}
+	// 	a.log.Info("Trident CRDs managed resource is ready", "name", tridentCRDsName)
+	// }
 
-	// 2. Load and Deploy RBAC Resources (NO exclusions needed anymore)
-	a.log.Info("Loading Trident RBAC resources", "path", rbacPath)
-	// Load only from the correct rbacPath, no exclusions needed as CRDs/Backends are separate dirs
-	rbacYamls, err := services.LoadYAMLFiles(rbacPath)
-	if err != nil {
-		return fmt.Errorf("failed to load Trident RBAC resources from %s: %w", rbacPath, err)
-	}
-	if len(rbacYamls) > 0 {
-		a.log.Info("Deploying Trident RBAC managed resource", "namespace", ex.Namespace, "name", tridentRbacMR)
-		err = services.DeployResources(ctx, a.client, ex.Namespace, tridentRbacMR, rbacYamls)
-		if err != nil {
-			return fmt.Errorf("failed to create managed resources for Trident RBAC: %w", err)
-		}
-		a.log.Info("Trident RBAC managed resource deployment initiated", "name", tridentRbacMR)
-	}
+	// // 2. Load and Deploy RBAC Resources (NO exclusions needed anymore)
+	// a.log.Info("Loading Trident RBAC resources", "path", rbacPath)
+	// // Load only from the correct rbacPath, no exclusions needed as CRDs/Backends are separate dirs
+	// rbacYamls, err := services.LoadYAMLFiles(rbacPath)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to load Trident RBAC resources from %s: %w", rbacPath, err)
+	// }
+	// if len(rbacYamls) > 0 {
+	// 	a.log.Info("Deploying Trident RBAC managed resource", "namespace", ex.Namespace, "name", tridentRbacMR)
+	// 	err = services.DeployResources(ctx, a.client, ex.Namespace, tridentRbacMR, rbacYamls)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to create managed resources for Trident RBAC: %w", err)
+	// 	}
+	// 	a.log.Info("Trident RBAC managed resource deployment initiated", "name", tridentRbacMR)
+	// }
 
-	// 3. Load and Deploy Backend Resources
-	a.log.Info("Loading Trident Backend resources", "path", backendPath)
-	backendYamls, err := services.LoadYAMLFiles(backendPath) // Load only from the correct backendPath
-	if err != nil {
-		return fmt.Errorf("failed to load Trident Backend resources from %s: %w", backendPath, err)
-	}
-	if len(backendYamls) > 0 {
-		a.log.Info("Deploying Trident Backends managed resource", "namespace", ex.Namespace, "name", tridentBackendsMR)
-		err = services.DeployResources(ctx, a.client, ex.Namespace, tridentBackendsMR, backendYamls)
-		if err != nil {
-			return fmt.Errorf("failed to create managed resources for Trident Backends: %w", err)
-		}
-		a.log.Info("Trident Backends managed resource deployment initiated", "name", tridentBackendsMR)
-	}
+	// // 3. Load and Deploy Backend Resources
+	// a.log.Info("Loading Trident Backend resources", "path", backendPath)
+	// backendYamls, err := services.LoadYAMLFiles(backendPath) // Load only from the correct backendPath
+	// if err != nil {
+	// 	return fmt.Errorf("failed to load Trident Backend resources from %s: %w", backendPath, err)
+	// }
+	// if len(backendYamls) > 0 {
+	// 	a.log.Info("Deploying Trident Backends managed resource", "namespace", ex.Namespace, "name", tridentBackendsMR)
+	// 	err = services.DeployResources(ctx, a.client, ex.Namespace, tridentBackendsMR, backendYamls)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to create managed resources for Trident Backends: %w", err)
+	// 	}
+	// 	a.log.Info("Trident Backends managed resource deployment initiated", "name", tridentBackendsMR)
+	// }
 
-	a.log.Info("ONTAP extension reconciliation completed successfully")
+	// a.log.Info("ONTAP extension reconciliation completed successfully")
 	return nil
 }
 
