@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/metal-lib/pkg/pointer"
@@ -187,4 +188,65 @@ func GetSVMByName(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) (
 
 	log.Info("SVM not found", "name", svmName)
 	return "", ErrNotFound
+}
+
+// waitForSvmReady polls until the SVM exists and is in a "running" state.
+func waitForSvmReady(log logr.Logger, ontapClient *ontapv1.Ontap, svmName string) (string, error) {
+	maxRetries := 10
+	retryDelay := 6 * time.Second
+
+	log.Info("waiting for SVM to be ready", "svmName", svmName)
+
+	for i := 0; i < maxRetries; i++ {
+		svmUUID, err := GetSVMByName(log, ontapClient, svmName)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				log.Info("SVM not found by name yet, retrying...", "svmName", svmName, "attempt", i+1)
+				if i < maxRetries-1 {
+					time.Sleep(retryDelay)
+				}
+				continue
+			}
+			log.Error(err, "Failed to get SVM by name, retrying...", "svmName", svmName, "attempt", i+1)
+			if i < maxRetries-1 {
+				time.Sleep(retryDelay)
+			}
+			continue
+		}
+
+		getParams := s_vm.NewSvmGetParams()
+		getParams.SetUUID(svmUUID)
+
+		svmInfo, err := ontapClient.SVM.SvmGet(getParams, nil)
+		if err != nil {
+			log.Error(err, "Failed to get SVM details after finding by name, retrying...", "svmName", svmName, "uuid", svmUUID, "attempt", i+1)
+			if i < maxRetries-1 {
+				time.Sleep(retryDelay)
+			}
+			continue
+		}
+
+		if svmInfo.Payload == nil || svmInfo.Payload.State == nil {
+			log.Info("SVM found, but state information is missing, retrying...", "svmName", svmName, "attempt", i+1)
+			if i < maxRetries-1 {
+				time.Sleep(retryDelay)
+			}
+			continue
+		}
+
+		currentState := *svmInfo.Payload.State
+		log.Info("Checking SVM state", "svmName", svmName, "uuid", svmUUID, "state", currentState, "attempt", i+1)
+		if currentState == "running" {
+			log.Info("SVM is ready", "svmName", svmName, "uuid", svmUUID, "state", currentState)
+			return svmUUID, nil
+		}
+
+		log.Info("SVM exists but is not yet running", "state", currentState, "svmName", svmName, "attempt", i+1)
+		if i < maxRetries-1 {
+			time.Sleep(retryDelay)
+		}
+	}
+
+	// If loop finishes, SVM was not found or did not become ready
+	return "", fmt.Errorf("SVM '%s' did not become ready after %d attempts", svmName, maxRetries)
 }

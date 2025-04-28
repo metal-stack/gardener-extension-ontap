@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
+	"net/http"
 
 	"github.com/gardener/gardener/pkg/client/kubernetes"
 	"github.com/gardener/gardener/pkg/utils/managedresources"
@@ -14,6 +14,7 @@ import (
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-openapi/runtime"
 	"github.com/go-openapi/strfmt"
 	"github.com/metal-stack/ontap-go/api/client/security"
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +35,7 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 	// Create or update user with the vsadmin role
 	err, password := CreateONTAPUserForSVM(ctx, log, seedClient, ontapClient, DefaultSVMUsername, projectId, shootNamespace)
 	// If the secret doesn't exist in the seed that means, this is the first shoot therefore we need to create it.
+	log.Info("err", "err after create", err)
 	if err != nil {
 		if errors.Is(err, ErrSeedSecretMissing) {
 			log.Info("seed Secret missing for first shoot, creating...")
@@ -56,73 +58,118 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 	return nil
 }
 
-// CreateONTAPUserForSVM creates a user for the specified SVM with the built-in vsadmin role
+// CreateONTAPUserForSVM checks if the user exists on ONTAP first, then potentially creates it.
 func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap,
 	username string, svmName string, shootNamespace string) (error, string) {
-	// Generate a secure password
-	password, err := GenerateSecurePassword()
+
+	log.Info("Ensuring ONTAP user for SVM", "username", username, "svm", svmName)
+
+	// 1. Wait for the SVM to be ready before doing anything else
+	svmUUID, err := waitForSvmReady(log, ontapClient, svmName)
 	if err != nil {
-		return fmt.Errorf("failed to generate secure password: %w", err), ""
+		return fmt.Errorf("SVM '%s' was not ready: %w", svmName, err), ""
 	}
-	log.Info("Creating ONTAP user for SVM", "username", username, "svm", svmName)
-	// Check if secret exists, if yes return the password
-	err, password = checkIfAccountExistsForSvm(ctx, log, seedClient, ontapClient, username, svmName, shootNamespace)
-	if errors.Is(err, ErrAlreadyExists) && password != "" {
-		return ErrAlreadyExists, password
+	log.Info("SVM is ready", "svmName", svmName, "uuid", svmUUID)
+
+	// 2. Check if user exists on ONTAP for this SVM
+	getAccountParams := security.NewAccountGetParams()
+	getAccountParams.SetOwnerUUID(svmUUID)
+	getAccountParams.SetName(username)
+
+	userExistsOnOntap := false
+	_, err = ontapClient.Security.AccountGet(getAccountParams, nil)
+
+	// Handle API errors during the check
+	if err != nil {
+		apiError, ok := err.(*runtime.APIError)
+		// If it's specifically a 404 Not Found, the user doesn't exist; otherwise, it's an unexpected error.
+		if !(ok && apiError.Code == http.StatusNotFound) {
+			return fmt.Errorf("failed to check if ONTAP user '%s' exists for SVM '%s': %w", username, svmName, err), ""
+		}
+		log.Info("User does not exist on ONTAP, will proceed with creation attempt", "username", username, "svm", svmName)
+		userExistsOnOntap = false // Explicitly false
 	}
 
-	// Fetch svm to create user for, retry a few times if not found initially
-	// Important to do this otherwise sometimes the ontap api is not ready/hasn't finished creating the svm
-	var svmUUID string
-	maxRetries := 3
-	retryDelay := 5 * time.Second
-	for i := 0; i < maxRetries; i++ {
-		log.Info("Trying to get svm after creation %w", i)
-		svmUUID, err = GetSVMByName(log, ontapClient, svmName)
-		if err == nil {
-			break // Found SVM, exit loop
-		}
-		log.Error(err, "Failed to get SVM UUID, retrying...", "svmName", svmName, "attempt", i+1)
-		if i < maxRetries-1 {
-			time.Sleep(retryDelay)
-		}
-	}
-	// If SVM still not found after retries, return error
-	if err != nil {
-		return fmt.Errorf("failed to get SVM UUID after %d attempts: %w", maxRetries, err), ""
+	// Only set true if the GET call succeeded without error (meaning user exists)
+	if err == nil {
+		log.Info("User already exists on ONTAP", "username", username, "svm", svmName)
+		userExistsOnOntap = true
 	}
 
-	// Create user with the built-in vsadmin role
+	// Handle case where user ALREADY EXISTS on ONTAP
+	if userExistsOnOntap {
+		log.Info("Checking K8s secret status for existing ONTAP user", "username", username, "svm", svmName)
+		secretErr, passwordFromSecret := checkIfAccountExistsForSvm(ctx, log, seedClient, ontapClient, username, svmName, shootNamespace)
+
+		// Secret also exists and is valid.
+		if errors.Is(secretErr, ErrAlreadyExists) {
+			log.Info("User exists on ONTAP and K8s secret is present", "username", username, "svm", svmName)
+			return ErrAlreadyExists, passwordFromSecret
+		}
+
+		// Secret is missing/invalid.
+		if errors.Is(secretErr, ErrSeedSecretMissing) {
+			log.Info("User exists on ONTAP, but K8s secret is missing/invalid. Generating new password for secret (Warning)", "username", username, "svm", svmName)
+			newPassword, passErr := GenerateSecurePassword()
+			if passErr != nil {
+				return fmt.Errorf("failed to generate password for missing secret: %w", passErr), ""
+			}
+			// Signal that the secret needs to be created/updated with this new password.
+			return ErrSeedSecretMissing, newPassword
+		}
+
+		// Unexpected error checking the secret.
+		if secretErr != nil {
+			return fmt.Errorf("failed to check K8s secret for existing ONTAP user '%s': %w", username, secretErr), ""
+		}
+
+		// If we reach here after userExistsOnOntap is true, it means checkIfAccountExistsForSvm returned nil error
+		return fmt.Errorf("internal logic error: reached end of userExistsOnOntap block unexpectedly"), "" // Or handle appropriately
+	}
+
+	// Handle case where user DOES NOT exist on ONTAP (userExistsOnOntap is false)
+	// This block is only reached if userExistsOnOntap was determined to be false earlier.
+	log.Info("Attempting to create ONTAP user", "username", username, "svm", svmName)
+	password, passErr := GenerateSecurePassword()
+	if passErr != nil {
+		return fmt.Errorf("failed to generate secure password for new user: %w", passErr), ""
+	}
+
 	application := "http"
 	authMethod := "password"
 	pwdVal := strfmt.Password(password)
 	vsadminRole := "vsadmin"
-	params := &security.AccountCreateParams{
-		Info: &models.Account{
-			Name:     pointer.Pointer(username),
-			Password: &pwdVal,
-			Role: &models.AccountInlineRole{
-				Name: pointer.Pointer(vsadminRole),
-			},
-			Owner: &models.AccountInlineOwner{
-				Name: pointer.Pointer(svmName),
-				UUID: pointer.Pointer(svmUUID),
-			},
-			AccountInlineApplications: []*models.AccountApplication{
-				{
-					Application: &application,
-					AuthenticationMethods: []*string{
-						&authMethod,
-					},
+
+	createAccountParams := security.NewAccountCreateParams()
+	createAccountParams.SetInfo(&models.Account{
+		Name:     pointer.Pointer(username),
+		Password: &pwdVal,
+		Role: &models.AccountInlineRole{
+			Name: pointer.Pointer(vsadminRole),
+		},
+		Owner: &models.AccountInlineOwner{
+			UUID: pointer.Pointer(svmUUID),
+		},
+		AccountInlineApplications: []*models.AccountApplication{
+			{
+				Application: &application,
+				AuthenticationMethods: []*string{
+					&authMethod,
 				},
 			},
 		},
+	})
+
+	_, createErr := ontapClient.Security.AccountCreate(createAccountParams, nil)
+	if createErr != nil {
+		apiError, ok := createErr.(*runtime.APIError)
+		if ok {
+			log.Error(createErr, "ONTAP API error during user creation", "username", username, "svm", svmName, "statusCode", apiError.Code, "response", apiError.Response)
+		}
+		return fmt.Errorf("failed to create ONTAP user '%s' for SVM '%s': %w", username, svmName, createErr), ""
 	}
-	_, err = ontapClient.Security.AccountCreate(params, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create ONTAP user: %w", err), ""
-	}
-	log.Info("ONTAP user created successfully", "username", username, "svm", svmName, "role", "vsadmin")
+
+	log.Info("ONTAP user created successfully", "username", username, "svm", svmName, "role", vsadminRole)
 	return ErrSeedSecretMissing, password
 }
 
