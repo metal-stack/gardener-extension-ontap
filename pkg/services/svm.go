@@ -168,7 +168,7 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 	log.Info("Assigning SVM to selected aggregate", "svm", projectId, "aggregateUUID", *chosenAggregateUUID)
 
 	// FIX THIS STILL
-	defaultBroadcastDomainName := "Default"
+	defaultBroadcastDomainName := "Default-1"
 	broadcastDomainUUID, err := GetBroadcastDomainUUIDByName(log, ontapClient, defaultBroadcastDomainName)
 	if err != nil {
 		return fmt.Errorf("failed to get broadcast domain UUID for '%s': %w", defaultBroadcastDomainName, err)

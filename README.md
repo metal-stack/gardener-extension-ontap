@@ -210,3 +210,8 @@ spec:
 
 bug when svm already exists, secret in shoot inst created bc it assumes bc secret is already in seed and that is used.
 add check if seed secret is there if svm is there if not create it again
+
+
+# Known Problems
+
+For some reason on the local environment when using the Default Broadcast domain a no route to host error occurs. If Using the Default-1 Broadcast domain everything works.
