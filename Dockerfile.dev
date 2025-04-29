@@ -1,0 +1,5 @@
+FROM alpine:3.21
+WORKDIR /
+COPY charts /charts
+COPY bin/gardener-extension-ontap /gardener-extension-ontap
+CMD ["/gardener-extension-ontap"]

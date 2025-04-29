@@ -150,8 +150,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		if _, _, err := a.decoder.Decode(cluster.Spec.Shoot.Raw, nil, shoot); err != nil {
 			log.Error(err, "failed to decode shoot, continuing with partial shoot object")
 		}
-	} else {
-		return fmt.Errorf("shoot spec in cluster resource is empty")
 	}
 
 	a.log.Info("Shoot annotations", "annotations", shoot.Annotations)

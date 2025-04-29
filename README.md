@@ -205,3 +205,8 @@ spec:
     requests:
       storage: 1Gi
   storageClassName: ontap-gold
+
+# to do 
+
+bug when svm already exists, secret in shoot inst created bc it assumes bc secret is already in seed and that is used.
+add check if seed secret is there if svm is there if not create it again

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 
 	"github.com/gardener/gardener/pkg/client/kubernetes"
 	"github.com/gardener/gardener/pkg/utils/managedresources"
@@ -14,7 +13,6 @@ import (
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/go-openapi/runtime"
 	"github.com/go-openapi/strfmt"
 	"github.com/metal-stack/ontap-go/api/client/security"
 	corev1 "k8s.io/api/core/v1"
@@ -24,7 +22,7 @@ import (
 
 // SVM user constants
 const (
-	DefaultSVMUsername = "vsadmin"
+	DefaultSVMUsername = "svmAdmin"
 	SecretNameFormat   = "ontap-svm-%s-credentials" ////nolint:all
 )
 
@@ -39,7 +37,7 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 	if err != nil {
 		if errors.Is(err, ErrSeedSecretMissing) {
 			log.Info("seed Secret missing for first shoot, creating...")
-			tridentSecret := buildSecret(secretName, DefaultSVMUsername, string(password), projectId, shootNamespace)
+			tridentSecret := buildSecret(secretName, DefaultSVMUsername, password, projectId, shootNamespace)
 			err := seedClient.Create(ctx, tridentSecret)
 			if err != nil {
 				return fmt.Errorf("creating secret in seed failed: %w", err)
@@ -71,65 +69,17 @@ func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient clie
 	}
 	log.Info("SVM is ready", "svmName", svmName, "uuid", svmUUID)
 
-	// 2. Check if user exists on ONTAP for this SVM
-	getAccountParams := security.NewAccountGetParams()
-	getAccountParams.SetOwnerUUID(svmUUID)
-	getAccountParams.SetName(username)
-
-	userExistsOnOntap := false
-	_, err = ontapClient.Security.AccountGet(getAccountParams, nil)
-
-	// Handle API errors during the check
-	if err != nil {
-		apiError, ok := err.(*runtime.APIError)
-		// If it's specifically a 404 Not Found, the user doesn't exist; otherwise, it's an unexpected error.
-		if !(ok && apiError.Code == http.StatusNotFound) {
-			return fmt.Errorf("failed to check if ONTAP user '%s' exists for SVM '%s': %w", username, svmName, err), ""
-		}
-		log.Info("User does not exist on ONTAP, will proceed with creation attempt", "username", username, "svm", svmName)
-		userExistsOnOntap = false // Explicitly false
-	}
-
-	// Only set true if the GET call succeeded without error (meaning user exists)
-	if err == nil {
-		log.Info("User already exists on ONTAP", "username", username, "svm", svmName)
-		userExistsOnOntap = true
-	}
-
 	// Handle case where user ALREADY EXISTS on ONTAP
-	if userExistsOnOntap {
-		log.Info("Checking K8s secret status for existing ONTAP user", "username", username, "svm", svmName)
-		secretErr, passwordFromSecret := checkIfAccountExistsForSvm(ctx, log, seedClient, ontapClient, username, svmName, shootNamespace)
+	log.Info("Checking K8s secret status for existing ONTAP user", "username", username, "svm", svmName)
+	secretErr, passwordFromSecret := checkIfAccountExistsForSvm(ctx, log, seedClient, ontapClient, username, svmName, shootNamespace)
 
-		// Secret also exists and is valid.
-		if errors.Is(secretErr, ErrAlreadyExists) {
-			log.Info("User exists on ONTAP and K8s secret is present", "username", username, "svm", svmName)
-			return ErrAlreadyExists, passwordFromSecret
-		}
-
-		// Secret is missing/invalid.
-		if errors.Is(secretErr, ErrSeedSecretMissing) {
-			log.Info("User exists on ONTAP, but K8s secret is missing/invalid. Generating new password for secret (Warning)", "username", username, "svm", svmName)
-			newPassword, passErr := GenerateSecurePassword()
-			if passErr != nil {
-				return fmt.Errorf("failed to generate password for missing secret: %w", passErr), ""
-			}
-			// Signal that the secret needs to be created/updated with this new password.
-			return ErrSeedSecretMissing, newPassword
-		}
-
-		// Unexpected error checking the secret.
-		if secretErr != nil {
-			return fmt.Errorf("failed to check K8s secret for existing ONTAP user '%s': %w", username, secretErr), ""
-		}
-
-		// If we reach here after userExistsOnOntap is true, it means checkIfAccountExistsForSvm returned nil error
-		return fmt.Errorf("internal logic error: reached end of userExistsOnOntap block unexpectedly"), "" // Or handle appropriately
+	// Secret also exists and is valid.
+	if errors.Is(secretErr, ErrAlreadyExists) {
+		log.Info("User exists on ONTAP and K8s secret is present", "username", username, "svm", svmName)
+		return ErrAlreadyExists, passwordFromSecret
 	}
 
-	// Handle case where user DOES NOT exist on ONTAP (userExistsOnOntap is false)
 	// This block is only reached if userExistsOnOntap was determined to be false earlier.
-	log.Info("Attempting to create ONTAP user", "username", username, "svm", svmName)
 	password, passErr := GenerateSecurePassword()
 	if passErr != nil {
 		return fmt.Errorf("failed to generate secure password for new user: %w", passErr), ""
@@ -147,6 +97,7 @@ func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient clie
 		Role: &models.AccountInlineRole{
 			Name: pointer.Pointer(vsadminRole),
 		},
+		Locked: pointer.Pointer(false),
 		Owner: &models.AccountInlineOwner{
 			UUID: pointer.Pointer(svmUUID),
 		},
@@ -162,10 +113,6 @@ func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient clie
 
 	_, createErr := ontapClient.Security.AccountCreate(createAccountParams, nil)
 	if createErr != nil {
-		apiError, ok := createErr.(*runtime.APIError)
-		if ok {
-			log.Error(createErr, "ONTAP API error during user creation", "username", username, "svm", svmName, "statusCode", apiError.Code, "response", apiError.Response)
-		}
 		return fmt.Errorf("failed to create ONTAP user '%s' for SVM '%s': %w", username, svmName, createErr), ""
 	}
 
@@ -198,7 +145,7 @@ func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient
 
 // very secure password for now
 func GenerateSecurePassword() (string, error) {
-	return "123456789", nil
+	return "fsqe2020", nil
 }
 
 // deployTridentSecrets creates or updates the secret for Trident
