@@ -237,3 +237,19 @@ vserver nvme subsystem show -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem
 
 vserver nvme subsystem host show -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem
 
+
+
+10.0.0.223
+
+
+
+sudo iptables -t nat -A PREROUTING -i lan0 -p tcp --dport 443 -j DNAT --to-destination 10.0.0.223
+sudo iptables -t nat -A PREROUTING -i lan1 -p tcp --dport 443 -j DNAT --to-destination 10.0.0.223
+
+sudo iptables -t nat -A POSTROUTING -o lan0 -p tcp --dport 443 -d 10.0.0.223 -j SNAT --to-source 10.130.184.5
+sudo iptables -t nat -A POSTROUTING -o lan1 -p tcp --dport 443 -d 10.0.0.223 -j SNAT --to-source 10.130.184.5
+
+iptables -I FORWARD 1 -i lan0 -o br-ontap-data -d 10.0.0.223 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT 
+iptables -I FORWARD 2 -i lan1 -o br-ontap-data -d 10.0.0.223 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT 
+iptables -I FORWARD 3 -i br-ontap-data -o lan0 -s 10.0.0.223 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 
+iptables -I FORWARD 4 -i br-ontap-data -o lan1 -s 10.0.0.223 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
