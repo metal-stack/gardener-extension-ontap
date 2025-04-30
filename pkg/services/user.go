@@ -42,13 +42,11 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 			if err != nil {
 				return fmt.Errorf("creating secret in seed failed: %w", err)
 			}
-			err = deployTridentSecretsInShootAsMR(ctx, log, projectId, shootNamespace, seedClient, secretName, DefaultSVMUsername, strfmt.Password(password))
 			return nil
 		}
 		return fmt.Errorf("error occured during creation of ontap user for svm %w", err)
 	}
 	// Create the secret name with project ID
-	err = deployTridentSecretsInShootAsMR(ctx, log, projectId, shootNamespace, seedClient, secretName, DefaultSVMUsername, strfmt.Password(password))
 	if err != nil {
 		return fmt.Errorf("failed to deploy secret: %w", err)
 	}
@@ -80,7 +78,7 @@ func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient clie
 	}
 
 	// This block is only reached if userExistsOnOntap was determined to be false earlier.
-	password, passErr := GenerateSecurePassword()
+	passErr, password := GenerateSecurePassword()
 	if passErr != nil {
 		return fmt.Errorf("failed to generate secure password for new user: %w", passErr), ""
 	}
@@ -144,12 +142,12 @@ func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient
 }
 
 // very secure password for now
-func GenerateSecurePassword() (string, error) {
-	return "fsqe2020", nil
+func GenerateSecurePassword() (error, string) {
+	return nil, "fsqe2020"
 }
 
 // deployTridentSecrets creates or updates the secret for Trident
-func deployTridentSecretsInShootAsMR(ctx context.Context, log logr.Logger, projectId string, shootNamespace string, seedClient client.Client, secretName, userName string, password strfmt.Password) error {
+func DeployTridentSecretsInShootAsMR(ctx context.Context, log logr.Logger, projectId string, shootNamespace string, seedClient client.Client, secretName, userName string, password strfmt.Password) error {
 
 	// Create the secret in the shoot namespace instead of kube-system
 	tridentSecret := buildSecret(secretName, userName, string(password), projectId, "kube-system")

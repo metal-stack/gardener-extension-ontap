@@ -10,6 +10,7 @@ import (
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	"github.com/gardener/gardener/pkg/utils/managedresources"
+	"github.com/go-openapi/strfmt"
 
 	"github.com/gardener/gardener/pkg/apis/core/install"
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -179,6 +180,10 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	rbacPath := filepath.Join(resourcesPath, "rbac")        // "charts/trident/resources/rbac"
 	crdPath := filepath.Join(resourcesPath, "crds")         // "charts/trident/resources/crds"
 	backendPath := filepath.Join(resourcesPath, "backends") // "charts/trident/resources/backends"
+
+	// deploy the secret in the shoot
+	err, password := services.GenerateSecurePassword()
+	err = services.DeployTridentSecretsInShootAsMR(ctx, log, projectId, a.shootNamespace, a.client, secretName, services.DefaultSVMUsername, strfmt.Password(password))
 
 	// Process backend templates - needs the correct path relative to chartPath for service
 	a.log.Info("Processing backend templates", "path", backendPath)

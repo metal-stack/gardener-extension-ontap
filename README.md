@@ -215,3 +215,25 @@ add check if seed secret is there if svm is there if not create it again
 # Known Problems
 
 For some reason on the local environment when using the Default Broadcast domain a no route to host error occurs. If Using the Default-1 Broadcast domain everything works.
+
+# Local Nvme setup
+
+## On worker node gardener
+
+kubectl-node_shell machine-shoot--local--local-local-6cffc-rx7gb
+apt-get install nvme-cli
+cat /etc/nvme/hostnqn
+
+## On ontap cluster
+
+set -privilege advanced
+vserver nvme subsystem create -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem -ostype linux
+
+vserver nvme subsystem host add -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem -host-nqn <<variable of cat output>>    
+
+vserver nvme subsystem map add -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem -path /vol/<<look tridentfrontend nvme namespaces>>
+
+vserver nvme subsystem show -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem
+
+vserver nvme subsystem host show -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem
+

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pvc-pod
+  namespace: kube-system
+spec:
+  containers:
+  - name: test-container
+    image: busybox:latest
+    command: ["/bin/sh", "-c", "echo 'Test file created' > /data/test.txt && sleep 3600"]
+    volumeMounts:
+    - mountPath: /data
+      name: basic
+  volumes:
+  - name: basic
+    persistentVolumeClaim:
+      claimName: basic
