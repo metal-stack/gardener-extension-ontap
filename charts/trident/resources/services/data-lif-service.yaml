@@ -7,13 +7,9 @@ metadata:
     app.kubernetes.io/part-of: gardener-extension-ontap
     app.kubernetes.io/managed-by: gardener
 spec:
-  internalTrafficPolicy: Cluster
-  ipFamilies:
-  - IPv4
-  ipFamilyPolicy: SingleStack
   ports:
-  - name: https 
-    port: 4420
+  - port: 4420
+    targetPort: 4420
     protocol: TCP
-    targetPort: 4420 
+    name: https
   type: ClusterIP
