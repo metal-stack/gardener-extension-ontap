@@ -38,9 +38,10 @@ import (
 
 const (
 	//Why hardcod
-	tridentCRDsName   string = "trident-crds"
-	tridentRbacMR     string = "trident-rbac"
-	tridentBackendsMR string = "trident-backends"
+	tridentCRDsName      string = "trident-crds"
+	tridentRbacMR        string = "trident-rbac"
+	tridentBackendsMR    string = "trident-backends"
+	tridentLifServicesMR string = "trident-lif-services" // New MR name for LIF services/endpoints
 )
 
 // NewActuator returns an actuator responsible for Extension resources.
@@ -163,7 +164,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
 
-	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace, "ontapConfig", ontapConfig.SvmIpaddresses, "ontapConfigData", ontapConfig.SvmIpaddresses.DataLif)
+	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLif)
 	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, a.shootNamespace)
 	if err != nil {
 		return err
@@ -175,20 +176,22 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		"namespace", "kube-system")
 
 	// Define base paths correctly based on the actual structure
-	chartPath := services.DefaultChartPath                  // "charts/trident"
-	resourcesPath := filepath.Join(chartPath, "resources")  // "charts/trident/resources"
-	rbacPath := filepath.Join(resourcesPath, "rbac")        // "charts/trident/resources/rbac"
-	crdPath := filepath.Join(resourcesPath, "crds")         // "charts/trident/resources/crds"
-	backendPath := filepath.Join(resourcesPath, "backends") // "charts/trident/resources/backends"
+	chartPath := services.DefaultChartPath                   // "charts/trident"
+	resourcesPath := filepath.Join(chartPath, "resources")   // "charts/trident/resources"
+	rbacPath := filepath.Join(resourcesPath, "rbac")         // "charts/trident/resources/rbac"
+	crdPath := filepath.Join(resourcesPath, "crds")          // "charts/trident/resources/crds"
+	backendPath := filepath.Join(resourcesPath, "backends")  // "charts/trident/resources/backends"
+	servicesPath := filepath.Join(resourcesPath, "services") // "charts/trident/resources/services"
 
 	// deploy the secret in the shoot
 	err, password := services.GenerateSecurePassword()
+	if err != nil {
+		// Handle error generating password (e.g., log and return)
+		return fmt.Errorf("failed to generate password for svmAdmin: %w", err)
+	}
 	err = services.DeployTridentSecretsInShootAsMR(ctx, log, projectId, a.shootNamespace, a.client, secretName, services.DefaultSVMUsername, strfmt.Password(password))
-
-	// Process backend templates - needs the correct path relative to chartPath for service
-	a.log.Info("Processing backend templates", "path", backendPath)
-	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName, ontapConfig.SvmIpaddresses.DataLif, ontapConfig.SvmIpaddresses.ManagementLif); err != nil {
-		return fmt.Errorf("failed to process backend templates: %w", err)
+	if err != nil {
+		return fmt.Errorf("failed to deploy trident secrets as MR: %w", err)
 	}
 
 	// 1. Load and Deploy CRDs
@@ -210,7 +213,39 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		a.log.Info("Trident CRDs managed resource is ready", "name", tridentCRDsName)
 	}
 
-	// 2. Load and Deploy RBAC Resources (NO exclusions needed anymore)
+	// 2. Load, Template, and Deploy LIF Services/Endpoints
+	a.log.Info("Loading LIF Service/Endpoints", "path", servicesPath)
+	serviceYamls, err := services.LoadYAMLFiles(servicesPath)
+	if err != nil {
+		return fmt.Errorf("failed to load LIF Service/Endpoints from %s: %w", servicesPath, err)
+	}
+	if len(serviceYamls) > 0 {
+		replacements := map[string]string{
+			"${PROJECT_ID}":        projectId,
+			"${MANAGEMENT_LIF_IP}": ontapConfig.SvmIpaddresses.ManagementLif,
+			"${DATA_LIF_IP}":       ontapConfig.SvmIpaddresses.DataLif,
+		}
+		templatedServiceYamls := make(map[string][]byte, len(serviceYamls))
+		for name, content := range serviceYamls {
+			templatedContent := string(content)
+			for placeholder, value := range replacements {
+				templatedContent = strings.ReplaceAll(templatedContent, placeholder, value)
+			}
+			templatedServiceYamls[name] = []byte(templatedContent)
+			a.log.Info("Templated LIF Service/Endpoint", "fileName", name, "content", templatedContent) // Verbose logging
+		}
+		a.log.Info("Deploying LIF Services/Endpoints managed resource", "namespace", a.shootNamespace, "name", tridentLifServicesMR)
+		if err := services.DeployResources(ctx, a.client, a.shootNamespace, tridentLifServicesMR, templatedServiceYamls); err != nil {
+			return fmt.Errorf("failed to deploy LIF Services/Endpoints: %w", err)
+		}
+		a.log.Info("Waiting for LIF Services/Endpoints managed resource to be ready", "name", tridentLifServicesMR)
+		if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentLifServicesMR); err != nil {
+			return fmt.Errorf("failed while waiting for LIF Services/Endpoints managed resource: %w", err)
+		}
+		a.log.Info("LIF Services/Endpoints managed resource is ready", "name", tridentLifServicesMR)
+	}
+
+	// 3. Load and Deploy RBAC Resources
 	a.log.Info("Loading Trident RBAC resources", "path", rbacPath)
 	// Load only from the correct rbacPath, no exclusions needed as CRDs/Backends are separate dirs
 	rbacYamls, err := services.LoadYAMLFiles(rbacPath)
@@ -225,8 +260,12 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		}
 		a.log.Info("Trident RBAC managed resource deployment initiated", "name", tridentRbacMR)
 	}
-
-	// 3. Load and Deploy Backend Resources
+	// 4. Process backend templates (only needs ProjectID now)
+	a.log.Info("Processing backend templates", "path", backendPath)
+	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName); err != nil {
+		return fmt.Errorf("failed to process backend templates: %w", err)
+	}
+	// 5. Load and Deploy Backend Resources
 	a.log.Info("Loading Trident Backend resources", "path", backendPath)
 	backendYamls, err := services.LoadYAMLFiles(backendPath) // Load only from the correct backendPath
 	if err != nil {
@@ -239,6 +278,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 			return fmt.Errorf("failed to create managed resources for Trident Backends: %w", err)
 		}
 		a.log.Info("Trident Backends managed resource deployment initiated", "name", tridentBackendsMR)
+		// Consider waiting for Backend MR if needed.
 	}
 
 	a.log.Info("ONTAP extension reconciliation completed successfully")
@@ -286,6 +326,7 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 
 // ensureSvmForProject creates an SVM for the project if it doesn't exist yet
 func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, SvmIpaddresses common.SvmIpaddresses, projectId string, shootNamespace string) error {
+
 	_, err := services.GetSVMByName(a.log, ontapClient, projectId)
 	if err != nil {
 		if errors.Is(err, services.ErrNotFound) {

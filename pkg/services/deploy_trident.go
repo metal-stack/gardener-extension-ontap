@@ -101,28 +101,20 @@ func DeployResources(
 	return nil
 }
 
-// ProcessBackendTemplates processes the backend templates with the given parameters
-// and updates them in place in the chart directory
-func ProcessBackendTemplates(
-	log logr.Logger,
-	chartPath string,
-	projectId string,
-	secretName string,
-	dataLif string,
-	managementLif string,
-) error {
-	// Create backend directory path based on the correct structure
-	// chartPath/resources/backends
-	backendDir := filepath.Join(chartPath, ResourcesDir, BackendsDir)
+// ProcessBackendTemplates reads backend templates, replaces placeholders, and writes the results back.
+// It now only replaces PROJECT_ID and SECRET_NAME as LIFs are handled by service FQDNs directly in the template.
+func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName string) error {
+	backendTemplateDir := filepath.Join(chartPath, "resources", "backends")
+	log.Info("Processing backend templates", "directory", backendTemplateDir)
 
 	// Ensure the backend directory exists
-	if err := os.MkdirAll(backendDir, 0755); err != nil {
-		return fmt.Errorf("failed to create backends directory %s: %w", backendDir, err)
+	if err := os.MkdirAll(backendTemplateDir, 0755); err != nil {
+		return fmt.Errorf("failed to create backends directory %s: %w", backendTemplateDir, err)
 	}
 
 	// Read template files
-	storageClassPath := filepath.Join(backendDir, StorageClassFilename)
-	backendConfigPath := filepath.Join(backendDir, BackendConfigFilename)
+	storageClassPath := filepath.Join(backendTemplateDir, StorageClassFilename)
+	backendConfigPath := filepath.Join(backendTemplateDir, BackendConfigFilename)
 
 	// Read backend config template (if it exists)
 	backendConfigTemplate, err := os.ReadFile(backendConfigPath)
@@ -134,8 +126,6 @@ func ProcessBackendTemplates(
 	if len(backendConfigTemplate) > 0 {
 		backendConfigYaml := strings.ReplaceAll(string(backendConfigTemplate), "${PROJECT_ID}", projectId)
 		backendConfigYaml = strings.ReplaceAll(backendConfigYaml, "${SECRET_NAME}", secretName)
-		backendConfigYaml = strings.ReplaceAll(backendConfigYaml, "${DATA_LIF}", dataLif)
-		backendConfigYaml = strings.ReplaceAll(backendConfigYaml, "${MANAGEMENT_LIF}", managementLif)
 
 		if strings.Contains(backendConfigYaml, "${PROJECT_ID}") {
 			log.Info("Warning: ${PROJECT_ID} placeholders still exist after replacement. Doing additional replacement.")
@@ -148,7 +138,7 @@ func ProcessBackendTemplates(
 		log.Info("Updated backend config file with project values",
 			"path", backendConfigPath,
 			"projectId", projectId,
-			"dataLif", dataLif)
+			"secretName", secretName)
 	}
 	// Log the storage class path
 	log.Info("Storage class file ready for deployment", "path", storageClassPath)
