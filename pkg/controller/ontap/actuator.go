@@ -221,9 +221,9 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	}
 	if len(serviceYamls) > 0 {
 		replacements := map[string]string{
-			"${PROJECT_ID}":        projectId,
 			"${MANAGEMENT_LIF_IP}": ontapConfig.SvmIpaddresses.ManagementLif,
 			"${DATA_LIF_IP}":       ontapConfig.SvmIpaddresses.DataLif,
+			// PROJECT_ID is no longer needed in service/endpoint names
 		}
 		templatedServiceYamls := make(map[string][]byte, len(serviceYamls))
 		for name, content := range serviceYamls {
@@ -232,8 +232,9 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 				templatedContent = strings.ReplaceAll(templatedContent, placeholder, value)
 			}
 			templatedServiceYamls[name] = []byte(templatedContent)
-			a.log.Info("Templated LIF Service/Endpoint", "fileName", name, "content", templatedContent) // Verbose logging
+			a.log.V(1).Info("Templated LIF Service/Endpoint", "fileName", name, "content", templatedContent) // Verbose logging
 		}
+
 		a.log.Info("Deploying LIF Services/Endpoints managed resource", "namespace", a.shootNamespace, "name", tridentLifServicesMR)
 		if err := services.DeployResources(ctx, a.client, a.shootNamespace, tridentLifServicesMR, templatedServiceYamls); err != nil {
 			return fmt.Errorf("failed to deploy LIF Services/Endpoints: %w", err)
@@ -243,6 +244,8 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 			return fmt.Errorf("failed while waiting for LIF Services/Endpoints managed resource: %w", err)
 		}
 		a.log.Info("LIF Services/Endpoints managed resource is ready", "name", tridentLifServicesMR)
+	} else {
+		a.log.Info("No LIF Service/Endpoint files found, skipping deployment.", "path", servicesPath)
 	}
 
 	// 3. Load and Deploy RBAC Resources

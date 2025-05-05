@@ -8,8 +8,8 @@ spec:
   backendName: ontap-${PROJECT_ID}
   storageDriverName: ontap-san
   sanType: nvme
-  managementLIF: ontap-${PROJECT_ID}-mgmt-svc.kube-system.svc.cluster.local
-  dataLIF: ontap-${PROJECT_ID}-data-svc.kube-system.svc.cluster.local
+  managementLIF: ontap-api
+  dataLIF: ontap-api-data
   svm: ${PROJECT_ID}
   credentials:
     name: ontap-svm-${PROJECT_ID}-credentials
