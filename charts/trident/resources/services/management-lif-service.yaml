@@ -3,13 +3,9 @@ kind: Service
 metadata:
   name: ontap-api
   namespace: kube-system
-  labels:
-    app.kubernetes.io/part-of: gardener-extension-ontap
-    app.kubernetes.io/managed-by: gardener
 spec:
   ports:
   - port: 443
     targetPort: 443
     protocol: TCP
     name: https
-  type: ClusterIP

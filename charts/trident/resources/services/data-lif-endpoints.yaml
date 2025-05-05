@@ -3,9 +3,6 @@ kind: Endpoints
 metadata:
   name: ontap-api-data
   namespace: kube-system
-  labels:
-    app.kubernetes.io/part-of: gardener-extension-ontap
-    app.kubernetes.io/managed-by: gardener
 subsets:
   - addresses:
     - ip: ${DATA_LIF_IP}
