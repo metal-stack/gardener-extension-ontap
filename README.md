@@ -215,6 +215,7 @@ add check if seed secret is there if svm is there if not create it again
 # Known Problems
 
 For some reason on the local environment when using the Default Broadcast domain a no route to host error occurs. If Using the Default-1 Broadcast domain everything works.
+On the test environment its the exact opposite
 
 # Local Nvme setup
 
@@ -227,29 +228,122 @@ cat /etc/nvme/hostnqn
 ## On ontap cluster
 
 set -privilege advanced
-vserver nvme subsystem create -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem -ostype linux
+vserver nvme subsystem create -vserver caa2ef965d4640d6b132de1b413490b8 -subsystem k8s_subsystem -ostype linux
 
-vserver nvme subsystem host add -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem -host-nqn <<variable of cat output>>    
+vserver nvme subsystem host add -vserver caa2ef965d4640d6b132de1b413490b8 -subsystem k8s_subsystem -host-nqn nqn.2014-08.org.nvmexpress:uuid:cd399400-960f-11ea-8000-3cecef6b3d04
+  
 
-vserver nvme subsystem map add -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem -path /vol/<<look tridentfrontend nvme namespaces>>
+vserver nvme subsystem map add -vserver caa2ef965d4640d6b132de1b413490b8 -subsystem k8s_subsystem -path /vol/<<look tridentfrontend nvme namespaces>>
 
-vserver nvme subsystem show -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem
+vserver nvme subsystem show -vserver caa2ef965d4640d6b132de1b413490b8 -subsystem k8s_subsystem
 
-vserver nvme subsystem host show -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -subsystem k8s_subsystem
-
-
-
-10.0.0.223
+vserver nvme subsystem host show -vserver caa2ef965d4640d6b132de1b413490b8 -subsystem k8s_subsystem
 
 
 
-sudo iptables -t nat -A PREROUTING -i lan0 -p tcp --dport 443 -j DNAT --to-destination 10.0.0.223
-sudo iptables -t nat -A PREROUTING -i lan1 -p tcp --dport 443 -j DNAT --to-destination 10.0.0.223
+# 1
+sudo iptables -t nat -A PREROUTING -i lan0 -p tcp --dport 443 -d 10.130.184.5 -j DNAT --to-destination 192.168.10.11
+ sudo iptables -t nat -A PREROUTING -i lan1 -p tcp --dport 443 -d 10.130.184.5 -j DNAT --to-destination 192.168.10.11
+ 
+  sudo iptables -t nat -A POSTROUTING -o lan0 -p tcp --dport 443 -d 192.168.10.11 -j SNAT --to-source 10.130.184.5
+ 
+  sudo iptables -t nat -A POSTROUTING -o lan1 -p tcp --dport 443 -d 192.168.10.11 -j SNAT --to-source 10.130.184.5
+ 
+  sudo iptables -I FORWARD 1 -i lan0 -o br-ontap-data -d 192.168.10.11 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+ 
+  sudo iptables -I FORWARD 2 -i lan1 -o br-ontap-data -d 192.168.10.11 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+ 
+  sudo iptables -I FORWARD 3 -i br-ontap-data -o lan0 -s 192.168.10.11 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+ 
+  sudo iptables -I FORWARD 4 -i br-ontap-data -o lan1 -s 192.168.10.11 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-sudo iptables -t nat -A POSTROUTING -o lan0 -p tcp --dport 443 -d 10.0.0.223 -j SNAT --to-source 10.130.184.5
-sudo iptables -t nat -A POSTROUTING -o lan1 -p tcp --dport 443 -d 10.0.0.223 -j SNAT --to-source 10.130.184.5
 
-iptables -I FORWARD 1 -i lan0 -o br-ontap-data -d 10.0.0.223 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT 
-iptables -I FORWARD 2 -i lan1 -o br-ontap-data -d 10.0.0.223 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT 
-iptables -I FORWARD 3 -i br-ontap-data -o lan0 -s 10.0.0.223 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 
-iptables -I FORWARD 4 -i br-ontap-data -o lan1 -s 10.0.0.223 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+# 2
+sudo iptables -t nat -A PREROUTING -i lan0 -p tcp --dport 443 -d 10.130.184.6 -j DNAT --to-destination 192.168.10.29
+sudo iptables -t nat -A PREROUTING -i lan1 -p tcp --dport 443 -j DNAT -d 10.130.184.6 --to-destination 192.168.10.29
+ 
+  sudo iptables -t nat -A POSTROUTING -o lan0 -p tcp --dport 443 -d 192.168.10.29 -j SNAT --to-source 10.130.184.6
+ 
+  sudo iptables -t nat -A POSTROUTING -o lan1 -p tcp --dport 443 -d 192.168.10.29 -j SNAT --to-source 10.130.184.6
+ 
+  sudo iptables -I FORWARD 1 -i lan0 -o br-ontap-data -d 192.168.10.29 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+ 
+  sudo iptables -I FORWARD 2 -i lan1 -o br-ontap-data -d 192.168.10.29 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+ 
+  sudo iptables -I FORWARD 3 -i br-ontap-data -o lan0 -s 192.168.10.29 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+ 
+  sudo iptables -I FORWARD 4 -i br-ontap-data -o lan1 -s 192.168.10.29 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# 3
+sudo iptables -t nat -A PREROUTING -i lan0 -p tcp --dport 4420 -d 10.130.184.7 -j DNAT --to-destination 192.168.10.30
+sudo iptables -t nat -A PREROUTING -i lan1 -p tcp --dport 4420 -j DNAT -d 10.130.184.7 --to-destination 192.168.10.30
+ 
+  sudo iptables -t nat -A POSTROUTING -o lan0 -p tcp --dport 4420 -d 192.168.10.30 -j SNAT --to-source 10.130.184.7
+ 
+  sudo iptables -t nat -A POSTROUTING -o lan1 -p tcp --dport 4420 -d 192.168.10.30 -j SNAT --to-source 10.130.184.7
+ 
+  sudo iptables -I FORWARD 1 -i lan0 -o br-ontap-data -d 192.168.10.30 -p tcp --dport 4420 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+ 
+  sudo iptables -I FORWARD 2 -i lan1 -o br-ontap-data -d 192.168.10.30 -p tcp --dport 4420 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+ 
+  sudo iptables -I FORWARD 3 -i br-ontap-data -o lan0 -s 192.168.10.30 -p tcp --sport 4420 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+ 
+  sudo iptables -I FORWARD 4 -i br-ontap-data -o lan1 -s 192.168.10.30 -p tcp --sport 4420 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+
+
+# On the worker node.
+
+iptables -t nat -A OUTPUT -d 192.168.10.30 -j DNAT --to-destination 10.130.184.7
+iptables -t nat -A OUTPUT -d 192.168.10.30 -p tcp --dport 4420 -j DNAT --to-destination 10.130.184.7:4420
+iptables -t nat -A POSTROUTING -d 10.130.184.7 -j MASQUERADE
+
+echo "10.130.184.7 192.168.10.30" >> /etc/hosts
+
+## 
+  sudo ip addr add 10.130.184.6/32 dev lo
+  sudo ip addr add 10.130.184.7/32 dev lo
+
+
+curl -k -u "admin:fsqe2020" https://10.130.184.6/api/svm/svms/
+
+curl -k -u "admin:fsqe2020" https://10.130.184.5/api/svm/svms/
+
+
+curl -k -u "svmAdmin:fsqe2020" https://10.130.184.6/api/svm/svms/
+
+
+
+curl -k -u "svmAdmin:fsqe2020" https://192.168.10.29/api/svm/svms/
+
+
+# STEPS
+
+
+Had to modprobe the nvme on the node first
+then restart the trident node linux pod
+then it should register
+then i create the pvc
+ 
+
+ nvme connect -t tcp -n nqn.1992-08.com.netapp:sn.75bd03da29a711f09cf403e0f0f1538f:subsystem shoot--pfw245--ontap-group--dcb30443-d9a1-4e10-a725-989ef64ebf08 -a 10.130.184.7 -s 4420 -l -1
+
+
+
+# 
+
+CWNP in Shoot:
+
+ebubekir@ebubekir-Dell-G16-7630:~/.kube/configs$ cat cw.yaml 
+ apiVersion: metal-stack.io/v1
+ kind: ClusterwideNetworkPolicy
+ metadata:
+   namespace: firewall
+   name: allow-nvme-port
+ spec:
+   egress:
+   - to:
+     - cidr: 10.130.184.7/32
+     ports:
+     - protocol: TCP
+       port: 4420
