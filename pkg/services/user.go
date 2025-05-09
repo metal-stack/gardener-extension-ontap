@@ -27,11 +27,11 @@ const (
 )
 
 // CreateUserAndSecret creates an svm scoped account set to vsadmin role.
-func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client) error {
+func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client, svmUUID string) error {
 	log.Info("Creating user for SVM", "svm", projectId)
 	secretName := fmt.Sprintf(SecretNameFormat, projectId)
 	// Create or update user with the vsadmin role
-	err, password := CreateONTAPUserForSVM(ctx, log, seedClient, ontapClient, DefaultSVMUsername, projectId, shootNamespace)
+	err, password := CreateONTAPUserForSVM(ctx, log, seedClient, ontapClient, DefaultSVMUsername, projectId, shootNamespace, svmUUID)
 	// If the secret doesn't exist in the seed that means, this is the first shoot therefore we need to create it.
 	log.Info("err", "err after create", err)
 	if err != nil {
@@ -56,16 +56,9 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 
 // CreateONTAPUserForSVM checks if the user exists on ONTAP first, then potentially creates it.
 func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap,
-	username string, svmName string, shootNamespace string) (error, string) {
+	username string, svmName string, shootNamespace string, svmUUID string) (error, string) {
 
 	log.Info("Ensuring ONTAP user for SVM", "username", username, "svm", svmName)
-
-	// 1. Wait for the SVM to be ready before doing anything else
-	svmUUID, err := waitForSvmReady(log, ontapClient, svmName)
-	if err != nil {
-		return fmt.Errorf("SVM '%s' was not ready: %w", svmName, err), ""
-	}
-	log.Info("SVM is ready", "svmName", svmName, "uuid", svmUUID)
 
 	// Handle case where user ALREADY EXISTS on ONTAP
 	log.Info("Checking K8s secret status for existing ONTAP user", "username", username, "svm", svmName)

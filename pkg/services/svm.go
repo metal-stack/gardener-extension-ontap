@@ -10,6 +10,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/metal-lib/pkg/pointer"
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
+	"github.com/metal-stack/ontap-go/api/client/cluster"
 	"github.com/metal-stack/ontap-go/api/client/networking"
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	"github.com/metal-stack/ontap-go/api/client/storage"
@@ -154,61 +155,110 @@ func GetBroadcastDomainUUIDByName(log logr.Logger, ontapClient *ontapv1.Ontap, d
 	return "", ErrNotFound
 }
 
-// CreateSVM creates an SVM for the given user and or project and returns the network interfaces
-func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client, SvmIpaddresses common.SvmIpaddresses) error {
-	log.Info("Creating SVM with ips", "name", projectId, "managementLif", SvmIpaddresses.ManagementLif, "dataLif", SvmIpaddresses.DataLif)
+// getFirstNodeInCluster fetches the first node name found in the ONTAP cluster
+func getFirstNodeInCluster(log logr.Logger, ontapClient *ontapv1.Ontap) (string, error) {
+	log.Info("Fetching first available node in cluster...")
 
-	// 1. Find a suitable aggregate *before* creating the SVM
+	params := cluster.NewNodesGetParams()
+	params.SetFields([]string{"uuid", "name"})
+
+	result, err := ontapClient.Cluster.NodesGet(params, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch nodes: %w", err)
+	}
+	for _, node := range result.Payload.NodeResponseInlineRecords {
+		log.Info("Node in Response", "nodes", node)
+	}
+
+	if result.Payload == nil {
+		return "", errors.New("no node information returned")
+	}
+	nodeUUID := *result.Payload.NodeResponseInlineRecords[0].UUID
+
+	return nodeUUID.String(), nil
+}
+
+// createNetworkInterfaceForSvm creates a network interface for the given SVM
+func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, svmUUID string,
+	svmName string, ipAddress string, netmask string, lifName string,
+	nodeUUID string, broadcastDomainUUID string, isDataLif bool) error {
+
+	log.Info("Creating network interface", "svm", svmName, "lifName", lifName, "ip", ipAddress, "node", nodeUUID)
+
+	params := networking.NewNetworkIPInterfacesCreateParams()
+	// Create the basic interface structure
+	interfaceInfo := &models.IPInterface{
+		Name:    pointer.Pointer(lifName),
+		Enabled: pointer.Pointer(true),
+		Svm: &models.IPInterfaceInlineSvm{
+			UUID: pointer.Pointer(svmUUID),
+		},
+	}
+
+	interfaceInfo.IP = &models.IPInfo{
+		Address: (*models.IPAddress)(pointer.Pointer(ipAddress)),
+		Netmask: (*models.IPNetmask)(pointer.Pointer(netmask)),
+	}
+
+	// Add location information
+	location := &models.IPInterfaceInlineLocation{}
+	location.HomeNode = &models.IPInterfaceInlineLocationInlineHomeNode{
+		UUID: pointer.Pointer(nodeUUID),
+	}
+	location.BroadcastDomain = &models.IPInterfaceInlineLocationInlineBroadcastDomain{
+		UUID: pointer.Pointer(broadcastDomainUUID),
+	}
+
+	interfaceInfo.Location = location
+	if isDataLif {
+		// NVMe/TCP policy
+		interfaceInfo.ServicePolicy = &models.IPInterfaceInlineServicePolicy{
+			Name: pointer.Pointer("default-data-nvme-tcp"),
+		}
+	}
+	if !isDataLif {
+		// Management policy
+		interfaceInfo.ServicePolicy = &models.IPInterfaceInlineServicePolicy{
+			Name: pointer.Pointer("default-management"),
+		}
+	}
+	// interfaceInfo.Vip = pointer.Pointer(true)
+	params.SetInfo(interfaceInfo)
+	_, err := ontapClient.Networking.NetworkIPInterfacesCreate(params, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create network interface %s for SVM %s: %w", lifName, svmName, err)
+	}
+	log.Info("Successfully created network interface", "lifName", lifName, "svm", svmName, "ip", ipAddress)
+	return nil
+}
+
+// CreateSVM creates an SVM and sets up network interfaces on a selected node
+func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client,
+	SvmIpaddresses common.SvmIpaddresses) error {
+	log.Info("Creating SVM with IPs", "name", projectId, "managementLif", SvmIpaddresses.ManagementLif, "dataLif", SvmIpaddresses.DataLif)
+
+	// 1. Find a suitable aggregate for the SVM
 	chosenAggregateUUID, err := findSuitableAggregate(log, ontapClient)
 	if err != nil {
-		// Decide if this should be fatal or if we fall back to ONTAP default
-		// For now, let's make it fatal for predictability
 		return fmt.Errorf("failed to find a suitable aggregate for SVM %s: %w", projectId, err)
 	}
 	log.Info("Assigning SVM to selected aggregate", "svm", projectId, "aggregateUUID", *chosenAggregateUUID)
 
-	// FIX THIS STILL
+	// 2. Get broadcast domain UUID for network interfaces
 	defaultBroadcastDomainName := "Default"
 	broadcastDomainUUID, err := GetBroadcastDomainUUIDByName(log, ontapClient, defaultBroadcastDomainName)
 	if err != nil {
-		return fmt.Errorf("failed to get broadcast domain UUID for '%s': %w", defaultBroadcastDomainName, err)
+		log.Info("Broadcast domain lookup failed, continuing with interface creation", "domain", defaultBroadcastDomainName, "error", err)
+		// Non-fatal, continue with empty broadcast domain UUID
+		broadcastDomainUUID = ""
 	}
 
+	// 3. Create the SVM without network interfaces
 	params := s_vm.NewSvmCreateParams()
 	params.Info = &models.Svm{
 		Name: &projectId,
-		// Assign the chosen aggregate to the SVM
 		SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
 			{UUID: chosenAggregateUUID},
-		},
-		SvmInlineIPInterfaces: []*models.IPInterfaceSvm{
-			{
-				Name: pointer.Pointer(common.DataLifTag),
-				IP: &models.IPInterfaceSvmInlineIP{
-					Address: (*models.IPAddressReadcreate)(pointer.Pointer(SvmIpaddresses.DataLif)),
-					Netmask: (*models.IPNetmaskCreateonly)(pointer.Pointer("24")), // Assuming /24 is desired from previous steps
-				},
-				Location: &models.IPInterfaceSvmInlineLocation{
-					BroadcastDomain: &models.IPInterfaceSvmInlineLocationInlineBroadcastDomain{
-						UUID: pointer.Pointer(broadcastDomainUUID),
-					},
-				},
-				// Use the policy suitable for the intended driver (NVMe/TCP in this case)
-				ServicePolicy: models.NewIPServicePolicySvmEnum(models.IPServicePolicySvmEnumDefaultDashDataDashNvmeDashTCP),
-			},
-			{
-				Name: pointer.Pointer(common.ManagementLifTag),
-				IP: &models.IPInterfaceSvmInlineIP{
-					Address: (*models.IPAddressReadcreate)(pointer.Pointer(SvmIpaddresses.ManagementLif)),
-					Netmask: (*models.IPNetmaskCreateonly)(pointer.Pointer("24")), // Assuming /24 is desired
-				},
-				Location: &models.IPInterfaceSvmInlineLocation{
-					BroadcastDomain: &models.IPInterfaceSvmInlineLocationInlineBroadcastDomain{
-						UUID: pointer.Pointer(broadcastDomainUUID),
-					},
-				},
-				ServicePolicy: models.NewIPServicePolicySvmEnum(models.IPServicePolicySvmEnumDefaultDashManagement),
-			},
 		},
 		Nvme: &models.SvmInlineNvme{
 			Enabled: pointer.Pointer(true),
@@ -216,19 +266,50 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 		},
 	}
 
-	log.Info("Sending SVM create request with explicit aggregate assignment", "params", fmt.Sprintf("%+v", params)) // Be careful logging sensitive data if any
+	log.Info("Sending SVM create request", "params", fmt.Sprintf("%+v", params))
 	_, _, err = ontapClient.SVM.SvmCreate(params, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create SVM %s: %w", projectId, err)
 	}
 	log.Info("SVM created successfully", "name", projectId, "aggregateUUID", *chosenAggregateUUID)
 
-	// 5. Create User and Secret (as before)
+	// 4. Wait for SVM to be ready and get its UUID
+	svmUUID, err := waitForSvmReady(log, ontapClient, projectId)
+	if err != nil {
+		return fmt.Errorf("SVM '%s' was not ready: %w", projectId, err)
+	}
+	log.Info("SVM is ready", "projectId", projectId, "uuid", svmUUID)
+
+	// 5. Get a node for network interface placement
+	nodeUUID, err := getFirstNodeInCluster(log, ontapClient)
+	if err != nil {
+		log.Info("Failed to get a node for LIF placement, will create LIFs without node affinity", "error", err)
+		return err
+	}
+
+	// 6. Create data LIF
+	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
+		SvmIpaddresses.DataLif, "24", common.DataLifTag,
+		nodeUUID, broadcastDomainUUID, true)
+	if err != nil {
+		return fmt.Errorf("failed to create data LIF for SVM %s: %w", projectId, err)
+	}
+
+	// 7. Create management LIF
+	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
+		SvmIpaddresses.ManagementLif, "24", common.ManagementLifTag,
+		nodeUUID, broadcastDomainUUID, false)
+	if err != nil {
+		return fmt.Errorf("failed to create management LIF for SVM %s: %w", projectId, err)
+	}
+
+	// 8. Create user and secret
 	log.Info("Proceeding to create user and secret for SVM", "svm", projectId)
-	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, shootNamespace, seedClient); err != nil {
+	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, shootNamespace, seedClient, svmUUID); err != nil {
 		return fmt.Errorf("SVM %s created, but failed to create user and secret: %w", projectId, err)
 	}
-	log.Info("Successfully created SVM, user, and secrets", "svm", projectId)
+
+	log.Info("Successfully completed SVM creation and setup", "svm", projectId)
 	return nil
 }
 
