@@ -180,11 +180,13 @@ func getFirstNodeInCluster(log logr.Logger, ontapClient *ontapv1.Ontap) (string,
 
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
 func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, svmUUID string,
-	svmName string, ipAddress string, netmask string, lifName string,
+	svmName string, ipAddress string, lifName string,
 	nodeUUID string, broadcastDomainUUID string, isDataLif bool) error {
 
 	log.Info("Creating network interface", "svm", svmName, "lifName", lifName, "ip", ipAddress, "node", nodeUUID)
 
+	// setting default netmask to 24, bc 32 is only possible if bgp peer is available and vip lif can be created
+	netmask := "24"
 	params := networking.NewNetworkIPInterfacesCreateParams()
 	// Create the basic interface structure
 	interfaceInfo := &models.IPInterface{
@@ -195,11 +197,21 @@ func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, s
 		},
 	}
 
+	paramsBgp := networking.NewNetworkIPBgpPeerGroupsGetParams()
+	bgpres, err := ontapClient.Networking.NetworkIPBgpPeerGroupsGet(paramsBgp, nil)
+	if err != nil {
+		return err
+	}
+	log.Info("bgp response", "bgp", bgpres)
+	// A bgp neighbor is there
+	if bgpres.Payload.NumRecords != nil && *bgpres.Payload.NumRecords != 0 {
+		netmask = "32"
+		interfaceInfo.Vip = pointer.Pointer(true)
+	}
 	interfaceInfo.IP = &models.IPInfo{
 		Address: (*models.IPAddress)(pointer.Pointer(ipAddress)),
 		Netmask: (*models.IPNetmask)(pointer.Pointer(netmask)),
 	}
-
 	// Add location information
 	location := &models.IPInterfaceInlineLocation{}
 	location.HomeNode = &models.IPInterfaceInlineLocationInlineHomeNode{
@@ -222,9 +234,8 @@ func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, s
 			Name: pointer.Pointer("default-management"),
 		}
 	}
-	// interfaceInfo.Vip = pointer.Pointer(true)
 	params.SetInfo(interfaceInfo)
-	_, err := ontapClient.Networking.NetworkIPInterfacesCreate(params, nil)
+	_, err = ontapClient.Networking.NetworkIPInterfacesCreate(params, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create network interface %s for SVM %s: %w", lifName, svmName, err)
 	}
@@ -289,7 +300,7 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 
 	// 6. Create data LIF
 	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
-		SvmIpaddresses.DataLif, "24", common.DataLifTag,
+		SvmIpaddresses.DataLif, common.DataLifTag,
 		nodeUUID, broadcastDomainUUID, true)
 	if err != nil {
 		return fmt.Errorf("failed to create data LIF for SVM %s: %w", projectId, err)
@@ -297,7 +308,7 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 
 	// 7. Create management LIF
 	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
-		SvmIpaddresses.ManagementLif, "24", common.ManagementLifTag,
+		SvmIpaddresses.ManagementLif, common.ManagementLifTag,
 		nodeUUID, broadcastDomainUUID, false)
 	if err != nil {
 		return fmt.Errorf("failed to create management LIF for SVM %s: %w", projectId, err)
