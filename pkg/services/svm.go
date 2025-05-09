@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -29,16 +28,91 @@ var (
 	ErrSeedSecretMissing = errors.New("SeedSecretMissing")
 )
 
-// findSuitableAggregate fetches all aggregates, filters them, and selects the best one
-// based on available space and usage percentage.
-func findSuitableAggregate(log logr.Logger, ontapClient *ontapv1.Ontap) (*string, error) {
-	log.Info("Finding suitable aggregate...")
+// CreateSVM creates an SVM and sets up network interfaces on a selected node
+func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client,
+	SvmIpaddresses common.SvmIpaddresses) error {
+	log.Info("Creating SVM with IPs", "name", projectId, "managementLif", SvmIpaddresses.ManagementLif, "dataLif", SvmIpaddresses.DataLif)
+
+	// 1. Get a node for network interface placement and aggregate selection
+	nodeUUID, err := getFirstNodeInCluster(log, ontapClient)
+	if err != nil {
+		return fmt.Errorf("failed to get a node for SVM creation: %w", err)
+	}
+
+	// 2. Find a suitable aggregate on the selected node
+	chosenAggregateUUID, err := findSuitableAggregateForNode(log, ontapClient, nodeUUID)
+	if err != nil {
+		return fmt.Errorf("failed to find a suitable aggregate for SVM %s: %w", projectId, err)
+	}
+	log.Info("Assigning SVM to selected aggregate", "svm", projectId, "aggregateUUID", *chosenAggregateUUID, "nodeUUID", nodeUUID)
+
+	// 3. Get broadcast domain UUID for network interfaces
+	broadcastDomainUUID, err := GetBroadcastDomainUUIDByName(log, ontapClient)
+	if err != nil {
+		log.Info("Broadcast domain lookup failed, continuing with interface creation", "error", err)
+		return err
+	}
+
+	// 4. Create the SVM without network interfaces
+	params := s_vm.NewSvmCreateParams()
+	params.Info = &models.Svm{
+		Name: &projectId,
+		SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
+			{UUID: chosenAggregateUUID},
+		},
+		Nvme: &models.SvmInlineNvme{
+			Enabled: pointer.Pointer(true),
+			Allowed: pointer.Pointer(true),
+		},
+	}
+
+	log.Info("Sending SVM create request", "params", fmt.Sprintf("%+v", params))
+	_, _, err = ontapClient.SVM.SvmCreate(params, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create SVM %s: %w", projectId, err)
+	}
+	log.Info("SVM created successfully", "name", projectId, "aggregateUUID", *chosenAggregateUUID)
+
+	// 5. Wait for SVM to be ready and get its UUID
+	svmUUID, err := waitForSvmReady(log, ontapClient, projectId)
+	if err != nil {
+		return fmt.Errorf("SVM '%s' was not ready: %w", projectId, err)
+	}
+	log.Info("SVM is ready", "projectId", projectId, "uuid", svmUUID)
+
+	// 6. Create data LIF
+	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
+		SvmIpaddresses.DataLif, common.DataLifTag,
+		nodeUUID, broadcastDomainUUID, true)
+	if err != nil {
+		return fmt.Errorf("failed to create data LIF for SVM %s: %w", projectId, err)
+	}
+
+	// 7. Create management LIF
+	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
+		SvmIpaddresses.ManagementLif, common.ManagementLifTag,
+		nodeUUID, broadcastDomainUUID, false)
+	if err != nil {
+		return fmt.Errorf("failed to create management LIF for SVM %s: %w", projectId, err)
+	}
+
+	// 8. Create user and secret
+	log.Info("Proceeding to create user and secret for SVM", "svm", projectId)
+	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, shootNamespace, seedClient, svmUUID); err != nil {
+		return fmt.Errorf("SVM %s created, but failed to create user and secret: %w", projectId, err)
+	}
+
+	log.Info("Successfully completed SVM creation and setup", "svm", projectId)
+	return nil
+}
+
+// findSuitableAggregateForNode fetches all aggregates on a specific node and selects the one
+// with the most available space that isn't a root aggregate
+func findSuitableAggregateForNode(log logr.Logger, ontapClient *ontapv1.Ontap, nodeUUID string) (*string, error) {
+	log.Info("Finding suitable aggregate on node", "nodeUUID", nodeUUID)
 
 	params := storage.NewAggregateCollectionGetParams()
-	// Request specific fields needed for logic to optimize the call
-	params.SetFields([]string{"uuid", "name", "state", "space"})
-	// Increase limit if many aggregates are expected
-	// params.SetMaxRecords(pointer.Pointer(int64(100)))
+	params.SetFields([]string{"uuid", "name", "state", "space", "node"})
 
 	result, err := ontapClient.Storage.AggregateCollectionGet(params, nil)
 	if err != nil {
@@ -49,88 +123,59 @@ func findSuitableAggregate(log logr.Logger, ontapClient *ontapv1.Ontap) (*string
 		return nil, errors.New("no aggregates found in the cluster")
 	}
 
-	type candidateAggregate struct {
-		UUID           string
-		Name           string
-		AvailableBytes int64
-		UsagePercent   float64
-		TotalSizeBytes int64
-	}
+	var bestUUID *string
+	var maxAvailable int64 = -1
+	var bestName string
 
-	var candidates []candidateAggregate
-
-	log.Info("Filtering aggregates", "totalFound", *result.Payload.NumRecords)
+	log.Info("Filtering aggregates on node", "nodeUUID", nodeUUID, "totalFound", *result.Payload.NumRecords)
 	for _, record := range result.Payload.AggregateResponseInlineRecords {
-		// Basic validation
-		if record.UUID == nil || record.Name == nil || record.State == nil || record.Space == nil || record.Space.BlockStorage == nil {
-			log.Info("Skipping aggregate due to missing essential fields", "record", record) // Log cautiously
+		// Skip if missing essential fields
+		if record.UUID == nil || record.Name == nil || record.State == nil ||
+			record.Space == nil || record.Space.BlockStorage == nil || record.Node == nil {
 			continue
 		}
 
-		// Filter by state (only 'online' aggregates)
+		// Skip if not on our selected node
+		if record.Node.UUID == nil || *record.Node.UUID != nodeUUID {
+			continue
+		}
+
+		// Skip if not online
 		if *record.State != "online" {
-			log.Info("Skipping aggregate due to state", "name", *record.Name, "state", *record.State)
+			log.Info("Skipping offline aggregate", "name", *record.Name)
 			continue
 		}
+		// We might wanna skip root aggregate too
 
-		// Filter aggregates with zero size (shouldn't happen but good practice)
-		totalSize := record.Space.BlockStorage.Size
-		if totalSize == nil || *totalSize <= 0 {
-			log.Info("Skipping aggregate with zero or missing size", "name", *record.Name)
-			continue
-		}
-
+		// Skip if no available space info
 		available := record.Space.BlockStorage.Available
-		used := record.Space.BlockStorage.Used
-		if available == nil || used == nil {
-			log.Info("Skipping aggregate with missing available/used space info", "name", *record.Name)
+		if available == nil || *available <= 0 {
 			continue
 		}
 
-		usagePercent := float64(*used) / float64(*totalSize)
-
-		candidates = append(candidates, candidateAggregate{
-			UUID:           *record.UUID,
-			Name:           *record.Name,
-			AvailableBytes: *available,
-			UsagePercent:   usagePercent,
-			TotalSizeBytes: *totalSize,
-		})
-		log.Info("Aggregate is a candidate", "name", *record.Name, "available", *available, "usage", usagePercent*100)
-	}
-
-	if len(candidates) == 0 {
-		return nil, errors.New("no suitable 'online' non-root aggregates found")
-	}
-
-	// Sort candidates by available space descending (most available first)
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].AvailableBytes > candidates[j].AvailableBytes
-	})
-
-	log.Info("Sorted aggregate candidates by available space", "count", len(candidates))
-
-	// Select the best candidate based on usage threshold (e.g., < 90%)
-	usageThreshold := 0.90
-	for _, candidate := range candidates {
-		log.Info("Checking candidate", "name", candidate.Name, "usage", candidate.UsagePercent*100, "threshold", usageThreshold*100)
-		if candidate.UsagePercent < usageThreshold {
-			log.Info("Selected aggregate", "name", candidate.Name, "uuid", candidate.UUID, "available", candidate.AvailableBytes, "usage", candidate.UsagePercent*100)
-			return &candidate.UUID, nil // Return pointer to the UUID string
+		// Keep track of the aggregate with the most available space
+		if *available > maxAvailable {
+			maxAvailable = *available
+			bestUUID = record.UUID
+			bestName = *record.Name
+			log.Info("Found better aggregate", "name", *record.Name, "available", *available)
 		}
-		log.Info("Candidate usage too high", "name", candidate.Name, "usage", candidate.UsagePercent*100)
 	}
 
-	// If we reach here, all suitable aggregates were above the usage threshold
-	return nil, fmt.Errorf("no suitable aggregate found below %.0f%% usage threshold", usageThreshold*100)
+	if bestUUID == nil {
+		return nil, fmt.Errorf("no suitable aggregates found on node %s", nodeUUID)
+	}
+
+	log.Info("Selected aggregate with most available space", "name", bestName, "uuid", *bestUUID, "availableBytes", maxAvailable)
+	return bestUUID, nil
 }
 
 // GetBroadcastDomainUUIDByName fetches the UUID of a broadcast domain given its name.
-func GetBroadcastDomainUUIDByName(log logr.Logger, ontapClient *ontapv1.Ontap, domainName string) (string, error) {
-	log.Info("fetching broadcast domain UUID by name", "name", domainName)
-
+func GetBroadcastDomainUUIDByName(log logr.Logger, ontapClient *ontapv1.Ontap) (string, error) {
+	// Right now we just use the broadcastdomain in the ipspace Default
+	// This ipspace is always there, we dont use ipspace seperation yet
 	params := networking.NewNetworkEthernetBroadcastDomainsGetParams()
-	params.Name = &domainName
+	params.IpspaceName = pointer.Pointer("Default")
 
 	result, err := ontapClient.Networking.NetworkEthernetBroadcastDomainsGet(params, nil)
 	if err != nil {
@@ -138,20 +183,20 @@ func GetBroadcastDomainUUIDByName(log logr.Logger, ontapClient *ontapv1.Ontap, d
 	}
 
 	if result.Payload == nil || result.Payload.NumRecords == nil || *result.Payload.NumRecords == 0 || len(result.Payload.BroadcastDomainResponseInlineRecords) == 0 {
-		log.Error(fmt.Errorf("broadcast domain not found"), "Broadcast domain not found", "name", domainName)
+		log.Error(fmt.Errorf("broadcast domain not found"), "Broadcast domain not found", "name")
 		return "", ErrNotFound
 	}
 
 	for _, record := range result.Payload.BroadcastDomainResponseInlineRecords {
-		if record.Name != nil && *record.Name == domainName {
+		if record.Name != nil {
 			if record.UUID == nil {
-				return "", fmt.Errorf("found broadcast domain '%s' but it has no UUID", domainName)
+				return "", fmt.Errorf("found broadcast domain '%s' but it has no UUID")
 			}
-			log.Info("Found broadcast domain", "name", domainName, "uuid", *record.UUID)
+			log.Info("Found broadcast domain", "ipspace", params.IpspaceName, "uuid", *record.UUID)
 			return *record.UUID, nil
 		}
 	}
-	log.Error(fmt.Errorf("broadcast domain not found after checking records"), "Broadcast domain not found", "name", domainName)
+	log.Error(fmt.Errorf("broadcast domain not found after checking records"), "Broadcast domain not found", "name")
 	return "", ErrNotFound
 }
 
@@ -240,87 +285,6 @@ func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, s
 		return fmt.Errorf("failed to create network interface %s for SVM %s: %w", lifName, svmName, err)
 	}
 	log.Info("Successfully created network interface", "lifName", lifName, "svm", svmName, "ip", ipAddress)
-	return nil
-}
-
-// CreateSVM creates an SVM and sets up network interfaces on a selected node
-func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client,
-	SvmIpaddresses common.SvmIpaddresses) error {
-	log.Info("Creating SVM with IPs", "name", projectId, "managementLif", SvmIpaddresses.ManagementLif, "dataLif", SvmIpaddresses.DataLif)
-
-	// 1. Find a suitable aggregate for the SVM
-	chosenAggregateUUID, err := findSuitableAggregate(log, ontapClient)
-	if err != nil {
-		return fmt.Errorf("failed to find a suitable aggregate for SVM %s: %w", projectId, err)
-	}
-	log.Info("Assigning SVM to selected aggregate", "svm", projectId, "aggregateUUID", *chosenAggregateUUID)
-
-	// 2. Get broadcast domain UUID for network interfaces
-	defaultBroadcastDomainName := "Default"
-	broadcastDomainUUID, err := GetBroadcastDomainUUIDByName(log, ontapClient, defaultBroadcastDomainName)
-	if err != nil {
-		log.Info("Broadcast domain lookup failed, continuing with interface creation", "domain", defaultBroadcastDomainName, "error", err)
-		// Non-fatal, continue with empty broadcast domain UUID
-		broadcastDomainUUID = ""
-	}
-
-	// 3. Create the SVM without network interfaces
-	params := s_vm.NewSvmCreateParams()
-	params.Info = &models.Svm{
-		Name: &projectId,
-		SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
-			{UUID: chosenAggregateUUID},
-		},
-		Nvme: &models.SvmInlineNvme{
-			Enabled: pointer.Pointer(true),
-			Allowed: pointer.Pointer(true),
-		},
-	}
-
-	log.Info("Sending SVM create request", "params", fmt.Sprintf("%+v", params))
-	_, _, err = ontapClient.SVM.SvmCreate(params, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create SVM %s: %w", projectId, err)
-	}
-	log.Info("SVM created successfully", "name", projectId, "aggregateUUID", *chosenAggregateUUID)
-
-	// 4. Wait for SVM to be ready and get its UUID
-	svmUUID, err := waitForSvmReady(log, ontapClient, projectId)
-	if err != nil {
-		return fmt.Errorf("SVM '%s' was not ready: %w", projectId, err)
-	}
-	log.Info("SVM is ready", "projectId", projectId, "uuid", svmUUID)
-
-	// 5. Get a node for network interface placement
-	nodeUUID, err := getFirstNodeInCluster(log, ontapClient)
-	if err != nil {
-		log.Info("Failed to get a node for LIF placement, will create LIFs without node affinity", "error", err)
-		return err
-	}
-
-	// 6. Create data LIF
-	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
-		SvmIpaddresses.DataLif, common.DataLifTag,
-		nodeUUID, broadcastDomainUUID, true)
-	if err != nil {
-		return fmt.Errorf("failed to create data LIF for SVM %s: %w", projectId, err)
-	}
-
-	// 7. Create management LIF
-	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
-		SvmIpaddresses.ManagementLif, common.ManagementLifTag,
-		nodeUUID, broadcastDomainUUID, false)
-	if err != nil {
-		return fmt.Errorf("failed to create management LIF for SVM %s: %w", projectId, err)
-	}
-
-	// 8. Create user and secret
-	log.Info("Proceeding to create user and secret for SVM", "svm", projectId)
-	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, shootNamespace, seedClient, svmUUID); err != nil {
-		return fmt.Errorf("SVM %s created, but failed to create user and secret: %w", projectId, err)
-	}
-
-	log.Info("Successfully completed SVM creation and setup", "svm", projectId)
 	return nil
 }
 
