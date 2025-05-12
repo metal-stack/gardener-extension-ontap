@@ -188,7 +188,14 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	existingSecret := &corev1.Secret{}
 	err = a.client.Get(ctx, client.ObjectKey{Namespace: "kube-system", Name: secretName}, existingSecret)
 
-	err = services.DeployTridentSecretsInShootAsMR(ctx, log, projectId, a.shootNamespace, a.client, secretName, string(existingSecret.Data["username"]), strfmt.Password(existingSecret.Data["password"]))
+	deployOpts := services.DeployTridentSecretsOptions{
+		ProjectID:      projectId,
+		ShootNamespace: a.shootNamespace,
+		SecretName:     secretName,
+		UserName:       string(existingSecret.Data["username"]),
+		Password:       strfmt.Password(existingSecret.Data["password"]),
+	}
+	err = services.DeployTridentSecretsInShootAsMR(ctx, log, a.client, deployOpts)
 	if err != nil {
 		return fmt.Errorf("failed to deploy trident secrets as MR: %w", err)
 	}
@@ -323,22 +330,29 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 	return nil
 }
 
-// ensureSvmForProject creates an SVM for the project if it doesn't exist yet
+// ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
 func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, SvmIpaddresses common.SvmIpaddresses, projectId string, shootNamespace string, svmSeedSecretNamespace string) error {
-
 	_, err := services.GetSVMByName(a.log, ontapClient, projectId)
 	if err != nil {
 		if errors.Is(err, services.ErrNotFound) {
-			a.log.Info("No SVM found with project ID, creating new SVM", "projectId", projectId)
-			err := services.CreateSVM(ctx, a.log, ontapClient, projectId, a.shootNamespace, a.client, SvmIpaddresses, svmSeedSecretNamespace)
-			if err != nil {
-				return fmt.Errorf("failed to create SVM or network interfaces: %w", err)
+			a.log.Info("SVM not found, proceeding with creation", "projectId", projectId)
+
+			svmOpts := services.CreateSVMOptions{
+				ProjectID:              projectId,
+				SvmIpaddresses:         SvmIpaddresses,
+				SvmSeedSecretNamespace: svmSeedSecretNamespace,
 			}
 
+			if err := services.CreateSVM(ctx, a.log, ontapClient, a.client, svmOpts); err != nil {
+				return fmt.Errorf("failed to ensure SVM for project %s: %w", projectId, err)
+			}
+			a.log.Info("Successfully created SVM", "projectId", projectId)
 			return nil
 		}
-		return fmt.Errorf("error getting SVM by name: %w", err)
+		// Handle other errors from GetSVMByName
+		return fmt.Errorf("failed to check for existing SVM %s: %w", projectId, err)
 	}
 
+	a.log.Info("SVM already exists, skipping creation", "projectId", projectId)
 	return nil
 }

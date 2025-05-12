@@ -28,10 +28,26 @@ var (
 	ErrSeedSecretMissing = errors.New("SeedSecretMissing")
 )
 
+// CreateSVMOptions holds the parameters required for CreateSVM function.
+type CreateSVMOptions struct {
+	ProjectID              string
+	SvmIpaddresses         common.SvmIpaddresses
+	SvmSeedSecretNamespace string
+}
+
+// CreateNetworkInterfaceOptions holds the parameters required for createNetworkInterfaceForSvm function.
+type CreateNetworkInterfaceOptions struct {
+	SvmUUID   string
+	SvmName   string
+	IPAddress string
+	LifName   string
+	NodeUUID  string
+	IsDataLif bool
+}
+
 // CreateSVM creates an SVM and sets up network interfaces on a selected node
-func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client,
-	SvmIpaddresses common.SvmIpaddresses, svmSeedSecretNamespace string) error {
-	log.Info("Creating SVM with IPs", "name", projectId, "managementLif", SvmIpaddresses.ManagementLif, "dataLif", SvmIpaddresses.DataLif)
+func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, seedClient client.Client, opts CreateSVMOptions) error {
+	log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLif", opts.SvmIpaddresses.DataLif)
 
 	// 1. Get a node for network interface placement and aggregate selection
 	nodeUUID, err := getFirstNodeInCluster(log, ontapClient)
@@ -42,14 +58,14 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 	// 2. Find a suitable aggregate on the selected node
 	chosenAggregateUUID, err := findSuitableAggregateForNode(log, ontapClient, nodeUUID)
 	if err != nil {
-		return fmt.Errorf("failed to find a suitable aggregate for SVM %s: %w", projectId, err)
+		return fmt.Errorf("failed to find a suitable aggregate for SVM %s: %w", opts.ProjectID, err)
 	}
-	log.Info("Assigning SVM to selected aggregate", "svm", projectId, "aggregateUUID", *chosenAggregateUUID, "nodeUUID", nodeUUID)
+	log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID, "aggregateUUID", *chosenAggregateUUID, "nodeUUID", nodeUUID)
 
 	// 3. Create the SVM without network interfaces
 	params := s_vm.NewSvmCreateParams()
 	params.Info = &models.Svm{
-		Name: &projectId,
+		Name: &opts.ProjectID,
 		SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
 			{UUID: chosenAggregateUUID},
 		},
@@ -62,40 +78,58 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 	log.Info("Sending SVM create request", "params", fmt.Sprintf("%+v", params))
 	_, _, err = ontapClient.SVM.SvmCreate(params, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create SVM %s: %w", projectId, err)
+		return fmt.Errorf("failed to create SVM %s: %w", opts.ProjectID, err)
 	}
-	log.Info("SVM created successfully", "name", projectId, "aggregateUUID", *chosenAggregateUUID)
+	log.Info("SVM created successfully", "name", opts.ProjectID, "aggregateUUID", *chosenAggregateUUID)
 
 	// 4. Wait for SVM to be ready and get its UUID
-	svmUUID, err := waitForSvmReady(log, ontapClient, projectId)
+	svmUUID, err := waitForSvmReady(log, ontapClient, opts.ProjectID)
 	if err != nil {
-		return fmt.Errorf("SVM '%s' was not ready: %w", projectId, err)
+		return fmt.Errorf("SVM '%s' was not ready: %w", opts.ProjectID, err)
 	}
-	log.Info("SVM is ready", "projectId", projectId, "uuid", svmUUID)
+	log.Info("SVM is ready", "projectId", opts.ProjectID, "uuid", svmUUID)
 
 	// 5. Create data LIF
-	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
-		SvmIpaddresses.DataLif, common.DataLifTag,
-		nodeUUID, true)
+	dataLifOpts := CreateNetworkInterfaceOptions{
+		SvmUUID:   svmUUID,
+		SvmName:   opts.ProjectID,
+		IPAddress: opts.SvmIpaddresses.DataLif,
+		LifName:   common.DataLifTag,
+		NodeUUID:  nodeUUID,
+		IsDataLif: true,
+	}
+	err = createNetworkInterfaceForSvm(log, ontapClient, dataLifOpts)
 	if err != nil {
-		return fmt.Errorf("failed to create data LIF for SVM %s: %w", projectId, err)
+		return fmt.Errorf("failed to create data LIF for SVM %s: %w", opts.ProjectID, err)
 	}
 
 	// 6. Create management LIF
-	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
-		SvmIpaddresses.ManagementLif, common.ManagementLifTag,
-		nodeUUID, false)
+	mgmtLifOpts := CreateNetworkInterfaceOptions{
+		SvmUUID:   svmUUID,
+		SvmName:   opts.ProjectID,
+		IPAddress: opts.SvmIpaddresses.ManagementLif,
+		LifName:   common.ManagementLifTag,
+		NodeUUID:  nodeUUID,
+		IsDataLif: false,
+	}
+	err = createNetworkInterfaceForSvm(log, ontapClient, mgmtLifOpts)
 	if err != nil {
-		return fmt.Errorf("failed to create management LIF for SVM %s: %w", projectId, err)
+		return fmt.Errorf("failed to create management LIF for SVM %s: %w", opts.ProjectID, err)
 	}
 
 	// 7. Create user and secret in svmSeedSecretNamespace namespace
-	log.Info("Proceeding to create user and secret for SVM", "svm", projectId)
-	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, svmSeedSecretNamespace, seedClient, svmUUID); err != nil {
-		return fmt.Errorf("SVM %s created, but failed to create user and secret: %w", projectId, err)
+	log.Info("Proceeding to create user and secret for SVM", "svm", opts.ProjectID)
+	userOpts := CreateUserAndSecretOptions{
+		ProjectID:              opts.ProjectID,
+		SvmSeedSecretNamespace: opts.SvmSeedSecretNamespace,
+		SeedClient:             seedClient,
+		SvmUUID:                svmUUID,
+	}
+	if err = CreateUserAndSecret(ctx, log, ontapClient, userOpts); err != nil {
+		return fmt.Errorf("SVM %s created, but failed to create user and secret: %w", opts.ProjectID, err)
 	}
 
-	log.Info("Successfully completed SVM creation and setup", "svm", projectId)
+	log.Info("Successfully completed SVM creation and setup", "svm", opts.ProjectID)
 	return nil
 }
 
@@ -188,21 +222,19 @@ func getFirstNodeInCluster(log logr.Logger, ontapClient *ontapv1.Ontap) (string,
 }
 
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
-func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, svmUUID string,
-	svmName string, ipAddress string, lifName string,
-	nodeUUID string, isDataLif bool) error {
+func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, opts CreateNetworkInterfaceOptions) error {
 
-	log.Info("Creating network interface", "svm", svmName, "lifName", lifName, "ip", ipAddress, "node", nodeUUID)
+	log.Info("Creating network interface", "svm", opts.SvmName, "lifName", opts.LifName, "ip", opts.IPAddress, "node", opts.NodeUUID)
 
 	// setting default netmask to 24, bc 32 is only possible if bgp peer is available and vip lif can be created
 	netmask := "24"
 	params := networking.NewNetworkIPInterfacesCreateParams()
 	// Create the basic interface structure
 	interfaceInfo := &models.IPInterface{
-		Name:    pointer.Pointer(lifName),
+		Name:    pointer.Pointer(opts.LifName),
 		Enabled: pointer.Pointer(true),
 		Svm: &models.IPInterfaceInlineSvm{
-			UUID: pointer.Pointer(svmUUID),
+			UUID: pointer.Pointer(opts.SvmUUID),
 		},
 	}
 
@@ -218,22 +250,22 @@ func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, s
 		interfaceInfo.Vip = pointer.Pointer(true)
 	}
 	interfaceInfo.IP = &models.IPInfo{
-		Address: (*models.IPAddress)(pointer.Pointer(ipAddress)),
+		Address: (*models.IPAddress)(pointer.Pointer(opts.IPAddress)),
 		Netmask: (*models.IPNetmask)(pointer.Pointer(netmask)),
 	}
 	// Add location information
 	location := &models.IPInterfaceInlineLocation{}
 	location.HomeNode = &models.IPInterfaceInlineLocationInlineHomeNode{
-		UUID: pointer.Pointer(nodeUUID),
+		UUID: pointer.Pointer(opts.NodeUUID),
 	}
 	interfaceInfo.Location = location
-	if isDataLif {
+	if opts.IsDataLif {
 		// NVMe/TCP policy
 		interfaceInfo.ServicePolicy = &models.IPInterfaceInlineServicePolicy{
 			Name: pointer.Pointer("default-data-nvme-tcp"),
 		}
 	}
-	if !isDataLif {
+	if !opts.IsDataLif {
 		// Management policy
 		interfaceInfo.ServicePolicy = &models.IPInterfaceInlineServicePolicy{
 			Name: pointer.Pointer("default-management"),
@@ -242,9 +274,9 @@ func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, s
 	params.SetInfo(interfaceInfo)
 	_, err = ontapClient.Networking.NetworkIPInterfacesCreate(params, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create network interface %s for SVM %s: %w", lifName, svmName, err)
+		return fmt.Errorf("failed to create network interface %s for SVM %s: %w", opts.LifName, opts.SvmName, err)
 	}
-	log.Info("Successfully created network interface", "lifName", lifName, "svm", svmName, "ip", ipAddress)
+	log.Info("Successfully created network interface", "lifName", opts.LifName, "svm", opts.SvmName, "ip", opts.IPAddress)
 	return nil
 }
 
