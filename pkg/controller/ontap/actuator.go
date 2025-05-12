@@ -38,10 +38,11 @@ import (
 
 const (
 	//Why hardcod
-	tridentCRDsName      string = "trident-crds"
-	tridentRbacMR        string = "trident-rbac"
-	tridentBackendsMR    string = "trident-backends"
-	tridentLifServicesMR string = "trident-lif-services" // New MR name for LIF services/endpoints
+	tridentCRDsName        string = "trident-crds"
+	tridentRbacMR          string = "trident-rbac"
+	tridentBackendsMR      string = "trident-backends"
+	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
+	svmSeedSecretNamespace string = "kube-system"
 )
 
 // NewActuator returns an actuator responsible for Extension resources.
@@ -165,7 +166,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	projectId = strings.ReplaceAll(projectId, "-", "")
 
 	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLif)
-	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, a.shootNamespace)
+	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, a.shootNamespace, svmSeedSecretNamespace)
 	if err != nil {
 		return err
 	}
@@ -183,13 +184,11 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	backendPath := filepath.Join(resourcesPath, "backends")  // "charts/trident/resources/backends"
 	servicesPath := filepath.Join(resourcesPath, "services") // "charts/trident/resources/services"
 
-	// deploy the secret in the shoot
-	err, password := services.GenerateSecurePassword()
-	if err != nil {
-		// Handle error generating password (e.g., log and return)
-		return fmt.Errorf("failed to generate password for svmAdmin: %w", err)
-	}
-	err = services.DeployTridentSecretsInShootAsMR(ctx, log, projectId, a.shootNamespace, a.client, secretName, services.DefaultSVMUsername, strfmt.Password(password))
+	// get existing secret for svm in kube-system namespace
+	existingSecret := &corev1.Secret{}
+	err = a.client.Get(ctx, client.ObjectKey{Namespace: "kube-system", Name: secretName}, existingSecret)
+
+	err = services.DeployTridentSecretsInShootAsMR(ctx, log, projectId, a.shootNamespace, a.client, secretName, string(existingSecret.Data["username"]), strfmt.Password(existingSecret.Data["password"]))
 	if err != nil {
 		return fmt.Errorf("failed to deploy trident secrets as MR: %w", err)
 	}
@@ -223,7 +222,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		replacements := map[string]string{
 			"${MANAGEMENT_LIF_IP}": ontapConfig.SvmIpaddresses.ManagementLif,
 			"${DATA_LIF_IP}":       ontapConfig.SvmIpaddresses.DataLif,
-			// PROJECT_ID is no longer needed in service/endpoint names
 		}
 		templatedServiceYamls := make(map[string][]byte, len(serviceYamls))
 		for name, content := range serviceYamls {
@@ -232,7 +230,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 				templatedContent = strings.ReplaceAll(templatedContent, placeholder, value)
 			}
 			templatedServiceYamls[name] = []byte(templatedContent)
-			a.log.V(1).Info("Templated LIF Service/Endpoint", "fileName", name, "content", templatedContent) // Verbose logging
+			a.log.Info("Templated LIF Service/Endpoint", "fileName", name, "content", templatedContent)
 		}
 
 		a.log.Info("Deploying LIF Services/Endpoints managed resource", "namespace", a.shootNamespace, "name", tridentLifServicesMR)
@@ -244,8 +242,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 			return fmt.Errorf("failed while waiting for LIF Services/Endpoints managed resource: %w", err)
 		}
 		a.log.Info("LIF Services/Endpoints managed resource is ready", "name", tridentLifServicesMR)
-	} else {
-		a.log.Info("No LIF Service/Endpoint files found, skipping deployment.", "path", servicesPath)
 	}
 
 	// 3. Load and Deploy RBAC Resources
@@ -328,13 +324,13 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 // ensureSvmForProject creates an SVM for the project if it doesn't exist yet
-func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, SvmIpaddresses common.SvmIpaddresses, projectId string, shootNamespace string) error {
+func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, SvmIpaddresses common.SvmIpaddresses, projectId string, shootNamespace string, svmSeedSecretNamespace string) error {
 
 	_, err := services.GetSVMByName(a.log, ontapClient, projectId)
 	if err != nil {
 		if errors.Is(err, services.ErrNotFound) {
 			a.log.Info("No SVM found with project ID, creating new SVM", "projectId", projectId)
-			err := services.CreateSVM(ctx, a.log, ontapClient, projectId, a.shootNamespace, a.client, SvmIpaddresses)
+			err := services.CreateSVM(ctx, a.log, ontapClient, projectId, a.shootNamespace, a.client, SvmIpaddresses, svmSeedSecretNamespace)
 			if err != nil {
 				return fmt.Errorf("failed to create SVM or network interfaces: %w", err)
 			}

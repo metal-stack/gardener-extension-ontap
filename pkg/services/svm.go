@@ -30,7 +30,7 @@ var (
 
 // CreateSVM creates an SVM and sets up network interfaces on a selected node
 func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client,
-	SvmIpaddresses common.SvmIpaddresses) error {
+	SvmIpaddresses common.SvmIpaddresses, svmSeedSecretNamespace string) error {
 	log.Info("Creating SVM with IPs", "name", projectId, "managementLif", SvmIpaddresses.ManagementLif, "dataLif", SvmIpaddresses.DataLif)
 
 	// 1. Get a node for network interface placement and aggregate selection
@@ -46,14 +46,7 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 	}
 	log.Info("Assigning SVM to selected aggregate", "svm", projectId, "aggregateUUID", *chosenAggregateUUID, "nodeUUID", nodeUUID)
 
-	// 3. Get broadcast domain UUID for network interfaces
-	broadcastDomainUUID, err := GetBroadcastDomainUUIDByName(log, ontapClient)
-	if err != nil {
-		log.Info("Broadcast domain lookup failed, continuing with interface creation", "error", err)
-		return err
-	}
-
-	// 4. Create the SVM without network interfaces
+	// 3. Create the SVM without network interfaces
 	params := s_vm.NewSvmCreateParams()
 	params.Info = &models.Svm{
 		Name: &projectId,
@@ -73,32 +66,32 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 	}
 	log.Info("SVM created successfully", "name", projectId, "aggregateUUID", *chosenAggregateUUID)
 
-	// 5. Wait for SVM to be ready and get its UUID
+	// 4. Wait for SVM to be ready and get its UUID
 	svmUUID, err := waitForSvmReady(log, ontapClient, projectId)
 	if err != nil {
 		return fmt.Errorf("SVM '%s' was not ready: %w", projectId, err)
 	}
 	log.Info("SVM is ready", "projectId", projectId, "uuid", svmUUID)
 
-	// 6. Create data LIF
+	// 5. Create data LIF
 	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
 		SvmIpaddresses.DataLif, common.DataLifTag,
-		nodeUUID, broadcastDomainUUID, true)
+		nodeUUID, true)
 	if err != nil {
 		return fmt.Errorf("failed to create data LIF for SVM %s: %w", projectId, err)
 	}
 
-	// 7. Create management LIF
+	// 6. Create management LIF
 	err = createNetworkInterfaceForSvm(log, ontapClient, svmUUID, projectId,
 		SvmIpaddresses.ManagementLif, common.ManagementLifTag,
-		nodeUUID, broadcastDomainUUID, false)
+		nodeUUID, false)
 	if err != nil {
 		return fmt.Errorf("failed to create management LIF for SVM %s: %w", projectId, err)
 	}
 
-	// 8. Create user and secret in kube-system namespace
+	// 7. Create user and secret in svmSeedSecretNamespace namespace
 	log.Info("Proceeding to create user and secret for SVM", "svm", projectId)
-	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, "kube-system", seedClient, svmUUID); err != nil {
+	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, svmSeedSecretNamespace, seedClient, svmUUID); err != nil {
 		return fmt.Errorf("SVM %s created, but failed to create user and secret: %w", projectId, err)
 	}
 
@@ -170,37 +163,8 @@ func findSuitableAggregateForNode(log logr.Logger, ontapClient *ontapv1.Ontap, n
 	return bestUUID, nil
 }
 
-// GetBroadcastDomainUUIDByName fetches the UUID of a broadcast domain given its name.
-func GetBroadcastDomainUUIDByName(log logr.Logger, ontapClient *ontapv1.Ontap) (string, error) {
-	// Right now we just use the broadcastdomain in the ipspace Default
-	// This ipspace is always there, we dont use ipspace seperation yet
-	params := networking.NewNetworkEthernetBroadcastDomainsGetParams()
-	params.IpspaceName = pointer.Pointer("Default")
-
-	result, err := ontapClient.Networking.NetworkEthernetBroadcastDomainsGet(params, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch broadcast domains: %w", err)
-	}
-
-	if result.Payload == nil || result.Payload.NumRecords == nil || *result.Payload.NumRecords == 0 || len(result.Payload.BroadcastDomainResponseInlineRecords) == 0 {
-		log.Error(fmt.Errorf("broadcast domain not found"), "Broadcast domain not found", "name")
-		return "", ErrNotFound
-	}
-
-	for _, record := range result.Payload.BroadcastDomainResponseInlineRecords {
-		if record.Name != nil {
-			if record.UUID == nil {
-				return "", fmt.Errorf("found broadcast domain '%s' but it has no UUID")
-			}
-			log.Info("Found broadcast domain", "ipspace", params.IpspaceName, "uuid", *record.UUID)
-			return *record.UUID, nil
-		}
-	}
-	log.Error(fmt.Errorf("broadcast domain not found after checking records"), "Broadcast domain not found", "name")
-	return "", ErrNotFound
-}
-
 // getFirstNodeInCluster fetches the first node name found in the ONTAP cluster
+// Needs to be changed, waiting for Netapp answer
 func getFirstNodeInCluster(log logr.Logger, ontapClient *ontapv1.Ontap) (string, error) {
 	log.Info("Fetching first available node in cluster...")
 
@@ -226,7 +190,7 @@ func getFirstNodeInCluster(log logr.Logger, ontapClient *ontapv1.Ontap) (string,
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
 func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, svmUUID string,
 	svmName string, ipAddress string, lifName string,
-	nodeUUID string, broadcastDomainUUID string, isDataLif bool) error {
+	nodeUUID string, isDataLif bool) error {
 
 	log.Info("Creating network interface", "svm", svmName, "lifName", lifName, "ip", ipAddress, "node", nodeUUID)
 
@@ -262,10 +226,6 @@ func createNetworkInterfaceForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, s
 	location.HomeNode = &models.IPInterfaceInlineLocationInlineHomeNode{
 		UUID: pointer.Pointer(nodeUUID),
 	}
-	location.BroadcastDomain = &models.IPInterfaceInlineLocationInlineBroadcastDomain{
-		UUID: pointer.Pointer(broadcastDomainUUID),
-	}
-
 	interfaceInfo.Location = location
 	if isDataLif {
 		// NVMe/TCP policy
