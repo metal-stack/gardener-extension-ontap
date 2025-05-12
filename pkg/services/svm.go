@@ -96,9 +96,9 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 		return fmt.Errorf("failed to create management LIF for SVM %s: %w", projectId, err)
 	}
 
-	// 8. Create user and secret
+	// 8. Create user and secret in kube-system namespace
 	log.Info("Proceeding to create user and secret for SVM", "svm", projectId)
-	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, shootNamespace, seedClient, svmUUID); err != nil {
+	if err = CreateUserAndSecret(ctx, log, ontapClient, projectId, "kube-system", seedClient, svmUUID); err != nil {
 		return fmt.Errorf("SVM %s created, but failed to create user and secret: %w", projectId, err)
 	}
 

@@ -27,17 +27,17 @@ const (
 )
 
 // CreateUserAndSecret creates an svm scoped account set to vsadmin role.
-func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client, svmUUID string) error {
+func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, kubeSeedSecret string, seedClient client.Client, svmUUID string) error {
 	log.Info("Creating user for SVM", "svm", projectId)
 	secretName := fmt.Sprintf(SecretNameFormat, projectId)
 	// Create or update user with the vsadmin role
-	err, password := CreateONTAPUserForSVM(ctx, log, seedClient, ontapClient, DefaultSVMUsername, projectId, shootNamespace, svmUUID)
+	err, password := CreateONTAPUserForSVM(ctx, log, seedClient, ontapClient, DefaultSVMUsername, projectId, kubeSeedSecret, svmUUID)
 	// If the secret doesn't exist in the seed that means, this is the first shoot therefore we need to create it.
 	log.Info("err", "err after create", err)
 	if err != nil {
 		if errors.Is(err, ErrSeedSecretMissing) {
 			log.Info("seed Secret missing for first shoot, creating...")
-			tridentSecret := buildSecret(secretName, DefaultSVMUsername, password, projectId, shootNamespace)
+			tridentSecret := buildSecret(secretName, DefaultSVMUsername, password, projectId, kubeSeedSecret)
 			err := seedClient.Create(ctx, tridentSecret)
 			if err != nil {
 				return fmt.Errorf("creating secret in seed failed: %w", err)
@@ -56,13 +56,13 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 
 // CreateONTAPUserForSVM checks if the user exists on ONTAP first, then potentially creates it.
 func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap,
-	username string, svmName string, shootNamespace string, svmUUID string) (error, string) {
+	username string, svmName string, kubeSeedSecret string, svmUUID string) (error, string) {
 
 	log.Info("Ensuring ONTAP user for SVM", "username", username, "svm", svmName)
 
 	// Handle case where user ALREADY EXISTS on ONTAP
 	log.Info("Checking K8s secret status for existing ONTAP user", "username", username, "svm", svmName)
-	secretErr, passwordFromSecret := checkIfAccountExistsForSvm(ctx, log, seedClient, ontapClient, username, svmName, shootNamespace)
+	secretErr, passwordFromSecret := checkIfAccountExistsForSvm(ctx, log, seedClient, ontapClient, username, svmName, kubeSeedSecret)
 
 	// Secret also exists and is valid.
 	if errors.Is(secretErr, ErrAlreadyExists) {
@@ -111,26 +111,26 @@ func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient clie
 	return ErrSeedSecretMissing, password
 }
 
-func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap, accountName string, svmName string, shootNamespace string) (error, string) {
-	// Check if secret exists in the shootNamespace
+func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap, accountName string, svmName string, kubeSeedSecret string) (error, string) {
+	// Check if secret exists in the kube-system namespace in seed
 	secretName := fmt.Sprintf(SecretNameFormat, svmName)
 	existingSecret := &corev1.Secret{}
-	err := seedClient.Get(ctx, client.ObjectKey{Namespace: shootNamespace, Name: secretName}, existingSecret)
+	err := seedClient.Get(ctx, client.ObjectKey{Namespace: kubeSeedSecret, Name: secretName}, existingSecret)
 	if err != nil {
 		// If secret is missing in seed
 		if apierrors.IsNotFound(err) {
-			log.Info("Secret not found in seed", "secretName", secretName, "namespace", shootNamespace)
+			log.Info("Secret not found in seed", "secretName", secretName, "namespace", kubeSeedSecret)
 			return ErrSeedSecretMissing, ""
 		}
-		log.Error(err, "Failed to get secret from seed", "secretName", secretName, "namespace", shootNamespace)
-		return fmt.Errorf("failed to get secret %s from namespace %s: %w", secretName, shootNamespace, err), ""
+		log.Error(err, "Failed to get secret from seed", "secretName", secretName, "namespace", kubeSeedSecret)
+		return fmt.Errorf("failed to get secret %s from namespace %s: %w", secretName, kubeSeedSecret, err), ""
 	}
 	// Secret exists, check if password field is present and not empty
 	if password, ok := existingSecret.Data["password"]; ok && len(password) > 0 {
-		log.Info("Secret exists and contains a password", "secretName", secretName, "namespace", shootNamespace)
+		log.Info("Secret exists and contains a password", "secretName", secretName, "namespace", kubeSeedSecret)
 		return ErrAlreadyExists, string(password)
 	}
-	log.Info("Secret exists but password field is missing or empty, considering it missing", "secretName", secretName, "namespace", shootNamespace)
+	log.Info("Secret exists but password field is missing or empty, considering it missing", "secretName", secretName, "namespace", kubeSeedSecret)
 	return ErrSeedSecretMissing, ""
 }
 
