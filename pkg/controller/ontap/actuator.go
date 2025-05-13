@@ -37,10 +37,11 @@ import (
 
 const (
 	//Why hardcod
-	tridentCRDsName      string = "trident-crds"
-	tridentRbacMR        string = "trident-rbac"
-	tridentBackendsMR    string = "trident-backends"
-	tridentLifServicesMR string = "trident-lif-services" // New MR name for LIF services/endpoints
+	tridentCRDsName        string = "trident-crds"
+	tridentRbacMR          string = "trident-rbac"
+	tridentBackendsMR      string = "trident-backends"
+	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
+	svmSeedSecretNamespace string = "kube-system"
 
 	defaultChartPath = "charts/trident"
 )
@@ -165,7 +166,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	projectId = strings.ReplaceAll(projectId, "-", "")
 
 	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLif)
-	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, a.shootNamespace)
+	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
 	if err != nil {
 		return err
 	}
@@ -183,7 +184,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 	// get existing secret for svm in kube-system namespace
 	existingSecret := &corev1.Secret{}
-	err = a.client.Get(ctx, client.ObjectKey{Namespace: "kube-system", Name: secretName}, existingSecret)
+	err = a.client.Get(ctx, client.ObjectKey{Namespace: svmSeedSecretNamespace, Name: secretName}, existingSecret)
 	if err != nil {
 		return fmt.Errorf("failed to get secret: %w", err)
 	}
