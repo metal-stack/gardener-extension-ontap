@@ -43,6 +43,8 @@ const (
 	tridentBackendsMR      string = "trident-backends"
 	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
 	svmSeedSecretNamespace string = "kube-system"
+
+	defaultChartPath = "charts/trident"
 )
 
 // NewActuator returns an actuator responsible for Extension resources.
@@ -93,7 +95,7 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		return nil, fmt.Errorf("unable to fetch clusterip from authsecret")
 	}
 
-	log.Info("Connecting to ONTAP using: username=%s, host=%s\n", string(username), string(clusterIp))
+	log.Info("Connecting to ONTAP", "username", string(username), "host", string(clusterIp))
 
 	cfg := ontapclient.Config{
 		AdminUser:     string(username),
@@ -117,7 +119,7 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
 		numSVMs = int(*result.Payload.NumRecords)
 	}
-	log.Info("Successfully connected to ONTAP. Found %w existing SVMs\n", "svms", numSVMs)
+	log.Info("Successfully connected to ONTAP. Found existing SVMs", "svms", numSVMs)
 
 	return ontap, nil
 }
@@ -176,7 +178,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		"namespace", "kube-system")
 
 	// Define base paths correctly based on the actual structure
-	chartPath := services.DefaultChartPath                   // "charts/trident"
+	chartPath := defaultChartPath                            // "charts/trident"
 	resourcesPath := filepath.Join(chartPath, "resources")   // "charts/trident/resources"
 	rbacPath := filepath.Join(resourcesPath, "rbac")         // "charts/trident/resources/rbac"
 	crdPath := filepath.Join(resourcesPath, "crds")          // "charts/trident/resources/crds"
@@ -210,7 +212,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	}
 	if len(crdYamls) > 0 {
 		a.log.Info("Deploying Trident CRDs managed resource", "namespace", a.shootNamespace, "name", tridentCRDsName)
-		if err := services.DeployResources(ctx, a.client, a.shootNamespace, tridentCRDsName, crdYamls); err != nil {
+		if err := services.DeployResources(ctx, a.log, a.client, a.shootNamespace, tridentCRDsName, crdYamls); err != nil {
 			return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
 		}
 		// Wait for CRD Managed Resource to be Ready
@@ -243,7 +245,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		}
 
 		a.log.Info("Deploying LIF Services/Endpoints managed resource", "namespace", a.shootNamespace, "name", tridentLifServicesMR)
-		if err := services.DeployResources(ctx, a.client, a.shootNamespace, tridentLifServicesMR, templatedServiceYamls); err != nil {
+		if err := services.DeployResources(ctx, a.log, a.client, a.shootNamespace, tridentLifServicesMR, templatedServiceYamls); err != nil {
 			return fmt.Errorf("failed to deploy LIF Services/Endpoints: %w", err)
 		}
 		a.log.Info("Waiting for LIF Services/Endpoints managed resource to be ready", "name", tridentLifServicesMR)
@@ -262,7 +264,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	}
 	if len(rbacYamls) > 0 {
 		a.log.Info("Deploying Trident RBAC managed resource", "namespace", ex.Namespace, "name", tridentRbacMR)
-		err = services.DeployResources(ctx, a.client, ex.Namespace, tridentRbacMR, rbacYamls)
+		err = services.DeployResources(ctx, a.log, a.client, ex.Namespace, tridentRbacMR, rbacYamls)
 		if err != nil {
 			return fmt.Errorf("failed to create managed resources for Trident RBAC: %w", err)
 		}
@@ -281,7 +283,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	}
 	if len(backendYamls) > 0 {
 		a.log.Info("Deploying Trident Backends managed resource", "namespace", ex.Namespace, "name", tridentBackendsMR)
-		err = services.DeployResources(ctx, a.client, ex.Namespace, tridentBackendsMR, backendYamls)
+		err = services.DeployResources(ctx, a.log, a.client, ex.Namespace, tridentBackendsMR, backendYamls)
 		if err != nil {
 			return fmt.Errorf("failed to create managed resources for Trident Backends: %w", err)
 		}
