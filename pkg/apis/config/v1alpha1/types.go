@@ -11,9 +11,6 @@ import (
 type ControllerConfiguration struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// ClusterManagementIp is the endpoint where the ontap rest api is accessible
-	ClusterManagementIp string `json:"clusterManagementIp,omitempty"`
-
 	// AuthSecretRef references to the secret which contains the auth credentials to connect to the ontap rest api.
 	AdminAuthSecretRef string `json:"adminAuthSecret,omitempty"`
 

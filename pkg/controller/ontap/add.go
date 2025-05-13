@@ -22,7 +22,13 @@ const (
 
 var (
 	// DefaultAddOptions are the default AddOptions for AddToManager.
-	DefaultAddOptions = AddOptions{}
+	DefaultAddOptions = AddOptions{
+
+		Config: config.ControllerConfiguration{
+			AdminAuthSecretRef:  "admin-access",
+			AuthSecretNamespace: "garden",
+		},
+	}
 )
 var log = runtimelog.Log.WithName("gardener-extension-ontap")
 

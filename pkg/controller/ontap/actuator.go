@@ -69,9 +69,9 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		return nil, fmt.Errorf("kubernetes client is not initialized")
 	}
 
-	if config.AdminAuthSecretRef == "" || config.ClusterManagementIp == "" || config.AuthSecretNamespace == "" {
-		return nil, fmt.Errorf("missing fields in config: AdminAuthSecretRef=%s, ClusterManagementIp=%s, AuthSecretNamespace=%s",
-			config.AdminAuthSecretRef, config.ClusterManagementIp, config.AuthSecretNamespace)
+	if config.AdminAuthSecretRef == "" || config.AuthSecretNamespace == "" {
+		return nil, fmt.Errorf("missing fields in config: AdminAuthSecretRef=%s, AuthSecretNamespace=%s",
+			config.AdminAuthSecretRef, config.AuthSecretNamespace)
 	}
 
 	var secret corev1.Secret
@@ -90,8 +90,7 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	}
 	clusterIp, ok := secret.Data["clusterIp"]
 	if !ok {
-		clusterIp = []byte(config.ClusterManagementIp)
-		fmt.Printf("Using clusterIp from config: %s\n", clusterIp)
+		return nil, fmt.Errorf("unable to fetch clusterip from authsecret")
 	}
 
 	log.Info("Connecting to ONTAP using: username=%s, host=%s\n", string(username), string(clusterIp))
