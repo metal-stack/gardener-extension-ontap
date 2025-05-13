@@ -18,7 +18,7 @@ const (
 type TridentConfig struct {
 	metav1.TypeMeta `json:",inline"`
 
-	//SvmIpAdresses are the endpoints needed by the
+	//SvmIpAddresses are the endpoints needed by the
 	SvmIpaddresses common.SvmIpaddresses `json:"svmIpaddresses,omitempty"`
 }
 type Protocols []Protocol

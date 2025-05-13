@@ -53,7 +53,7 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 		KubeSeedSecretNs: opts.SvmSeedSecretNamespace,
 		SvmUUID:          opts.SvmUUID,
 	}
-	err, password := CreateONTAPUserForSVM(ctx, log, opts.SeedClient, ontapClient, ontapUserOpts)
+	password, err := createONTAPUserForSVM(ctx, log, opts.SeedClient, ontapClient, ontapUserOpts)
 	// If the secret doesn't exist in the seed that means, this is the first shoot therefore we need to create it.
 	log.Info("err", "err after create", err)
 	if err != nil {
@@ -66,7 +66,7 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 			}
 			return nil
 		}
-		return fmt.Errorf("error occured during creation of ontap user for svm %w", err)
+		return fmt.Errorf("error occurred during creation of ontap user for svm %w", err)
 	}
 	// Create the secret name with project ID
 	if err != nil {
@@ -76,27 +76,23 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 	return nil
 }
 
-// CreateONTAPUserForSVM checks if the user exists on ONTAP first, then potentially creates it.
-func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap,
-	opts CreateONTAPUserOptions) (error, string) {
+// createONTAPUserForSVM checks if the user exists on ONTAP first, then potentially creates it.
+func createONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap, opts CreateONTAPUserOptions) (string, error) {
 
 	log.Info("Ensuring ONTAP user for SVM", "username", opts.Username, "svm", opts.SvmName)
 
 	// Handle case where user ALREADY EXISTS on ONTAP
 	log.Info("Checking K8s secret status for existing ONTAP user", "username", opts.Username, "svm", opts.SvmName)
-	secretErr, passwordFromSecret := checkIfAccountExistsForSvm(ctx, log, seedClient, ontapClient, opts.Username, opts.SvmName, opts.KubeSeedSecretNs)
+	passwordFromSecret, secretErr := checkIfAccountExistsForSvm(ctx, log, seedClient, ontapClient, opts.Username, opts.SvmName, opts.KubeSeedSecretNs)
 
 	// Secret also exists and is valid.
 	if errors.Is(secretErr, ErrAlreadyExists) {
 		log.Info("User exists on ONTAP and K8s secret is present", "username", opts.Username, "svm", opts.SvmName)
-		return ErrAlreadyExists, passwordFromSecret
+		return passwordFromSecret, ErrAlreadyExists
 	}
 
 	// This block is only reached if userExistsOnOntap was determined to be false earlier.
-	passErr, password := GenerateSecurePassword()
-	if passErr != nil {
-		return fmt.Errorf("failed to generate secure password for new user: %w", passErr), ""
-	}
+	password := generateSecurePassword()
 
 	application := "http"
 	authMethod := "password"
@@ -126,11 +122,11 @@ func CreateONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient clie
 
 	_, createErr := ontapClient.Security.AccountCreate(createAccountParams, nil)
 	if createErr != nil {
-		return fmt.Errorf("failed to create ONTAP user '%s' for SVM '%s': %w", opts.Username, opts.SvmName, createErr), ""
+		return "", fmt.Errorf("failed to create ONTAP user '%s' for SVM '%s': %w", opts.Username, opts.SvmName, createErr)
 	}
 
 	log.Info("ONTAP user created successfully", "username", opts.Username, "svm", opts.SvmName, "role", vsadminRole)
-	return ErrSeedSecretMissing, password
+	return password, ErrSeedSecretMissing
 }
 
 // DeployTridentSecretsOptions holds parameters for DeployTridentSecretsInShootAsMR
@@ -142,7 +138,7 @@ type DeployTridentSecretsOptions struct {
 	Password       strfmt.Password
 }
 
-func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap, accountName string, svmName string, kubeSeedSecret string) (error, string) {
+func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap, accountName string, svmName string, kubeSeedSecret string) (string, error) {
 	// Check if secret exists in the kube-system namespace in seed
 	secretName := fmt.Sprintf(SecretNameFormat, svmName)
 	existingSecret := &corev1.Secret{}
@@ -151,23 +147,24 @@ func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient
 		// If secret is missing in seed
 		if apierrors.IsNotFound(err) {
 			log.Info("Secret not found in seed", "secretName", secretName, "namespace", kubeSeedSecret)
-			return ErrSeedSecretMissing, ""
+			return "", ErrSeedSecretMissing
 		}
 		log.Error(err, "Failed to get secret from seed", "secretName", secretName, "namespace", kubeSeedSecret)
-		return fmt.Errorf("failed to get secret %s from namespace %s: %w", secretName, kubeSeedSecret, err), ""
+		return "", fmt.Errorf("failed to get secret %s from namespace %s: %w", secretName, kubeSeedSecret, err)
 	}
 	// Secret exists, check if password field is present and not empty
 	if password, ok := existingSecret.Data["password"]; ok && len(password) > 0 {
 		log.Info("Secret exists and contains a password", "secretName", secretName, "namespace", kubeSeedSecret)
-		return ErrAlreadyExists, string(password)
+		return string(password), ErrAlreadyExists
 	}
 	log.Info("Secret exists but password field is missing or empty, considering it missing", "secretName", secretName, "namespace", kubeSeedSecret)
-	return ErrSeedSecretMissing, ""
+	return "", ErrSeedSecretMissing
 }
 
 // very secure password for now
-func GenerateSecurePassword() (error, string) {
-	return nil, "fsqe2020"
+// FIXME what is this for
+func generateSecurePassword() string {
+	return "fsqe2020"
 }
 
 // deployTridentSecrets creates or updates the secret for Trident

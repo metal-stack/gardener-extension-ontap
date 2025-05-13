@@ -187,6 +187,9 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	// get existing secret for svm in kube-system namespace
 	existingSecret := &corev1.Secret{}
 	err = a.client.Get(ctx, client.ObjectKey{Namespace: "kube-system", Name: secretName}, existingSecret)
+	if err != nil {
+		return fmt.Errorf("failed to get secret: %w", err)
+	}
 
 	deployOpts := services.DeployTridentSecretsOptions{
 		ProjectID:      projectId,
