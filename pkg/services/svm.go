@@ -299,14 +299,14 @@ func GetAllSVM(log logr.Logger, ontapClient *ontapv1.Ontap) error {
 	}
 
 	if svmGetOK.Payload.NumRecords != nil {
-		fmt.Printf("Number of SVM records: %d\n", *svmGetOK.Payload.NumRecords)
+		log.Info("number of SVM records", "count", *svmGetOK.Payload.NumRecords)
 	} else {
-		log.Info("Number of SVM records is not available.")
+		log.Info("number of SVM records is not available.")
 	}
 
 	for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
 		if svm.UUID != nil && svm.Name != nil {
-			fmt.Printf("SVM UUID: %s, Name: %s\n", *svm.UUID, *svm.Name)
+			log.Info("svm", "uuid", *svm.UUID, "name", *svm.Name)
 		} else {
 			log.Info("One of the required SVM details (UUID or Name) is not available.")
 		}

@@ -15,13 +15,8 @@ import (
 // Constants for paths and names
 const (
 	// Constants for directory names
-	ResourcesDir          = "resources"
-	RbacDir               = "rbac"
-	CRDsDir               = "crds"
-	BackendsDir           = "backends"
-	StorageClassFilename  = "storageclass.yaml"
-	BackendConfigFilename = "backend-config.yaml"
-	DefaultChartPath      = "charts/trident"
+	storageClassFilename  = "storageclass.yaml"
+	backendConfigFilename = "backend-config.yaml"
 )
 
 // LoadYAMLFiles walks the given directory path and reads all YAML files,
@@ -30,8 +25,7 @@ func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	// Check if the base directory exists
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		fmt.Printf("Directory does not exist, returning empty map: %s\n", dirPath)
-		return result, nil
+		return result, fmt.Errorf("directory does not exist, returning empty map: %s", dirPath)
 	}
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -62,7 +56,7 @@ func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
 		return nil, fmt.Errorf("error walking %s: %w", dirPath, err)
 	}
 	if len(result) == 0 {
-		fmt.Printf("No YAML files found in: %s\n", dirPath)
+		return result, fmt.Errorf("no YAML files found in: %s", dirPath)
 	}
 	return result, nil
 }
@@ -70,6 +64,7 @@ func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
 // DeployResources deploys the provided YAML data as a managed resource.
 func DeployResources(
 	ctx context.Context,
+	log logr.Logger,
 	k8sClient client.Client,
 	namespace string,
 	resourceName string,
@@ -77,12 +72,11 @@ func DeployResources(
 ) error {
 	// Check if there are any resources to deploy
 	if len(resourceYamls) == 0 {
-		fmt.Printf("No resources found to deploy for managed resource '%s' in namespace '%s'. Skipping deployment.\n", resourceName, namespace)
+		log.Info("no resources found to deploy for managed resource, skipping deployment", "name", resourceName, "namespace", namespace)
 		return nil
 	}
 
-	fmt.Printf("Deploying %d YAML files for managed resource '%s' in namespace '%s'\n",
-		len(resourceYamls), resourceName, namespace)
+	log.Info("deploying YAML files for managed resource", "name", resourceName, "namespace", namespace, "count", len(resourceYamls))
 
 	// Create the managed resource
 	if err := managedresources.CreateForShoot(
@@ -97,7 +91,7 @@ func DeployResources(
 		return fmt.Errorf("failed to create managed resource %s: %w", resourceName, err)
 	}
 
-	fmt.Printf("Successfully initiated deployment for managed resource '%s'\n", resourceName)
+	log.Info("successfully initiated deployment for managed resource", "name", resourceName)
 	return nil
 }
 
@@ -113,8 +107,8 @@ func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName s
 	}
 
 	// Read template files
-	storageClassPath := filepath.Join(backendTemplateDir, StorageClassFilename)
-	backendConfigPath := filepath.Join(backendTemplateDir, BackendConfigFilename)
+	storageClassPath := filepath.Join(backendTemplateDir, storageClassFilename)
+	backendConfigPath := filepath.Join(backendTemplateDir, backendConfigFilename)
 
 	// Read backend config template (if it exists)
 	backendConfigTemplate, err := os.ReadFile(backendConfigPath)
