@@ -16,8 +16,7 @@ import (
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
-	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
-	"github.com/metal-stack/gardener-extension-ontap/pkg/common"
+	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/services"
 	"github.com/metal-stack/metal-lib/pkg/tag"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,11 +37,10 @@ import (
 
 const (
 	//Why hardcod
-	tridentCRDsName        string = "trident-crds"
-	tridentRbacMR          string = "trident-rbac"
-	tridentBackendsMR      string = "trident-backends"
-	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
-	svmSeedSecretNamespace string = "kube-system"
+	tridentCRDsName      string = "trident-crds"
+	tridentRbacMR        string = "trident-rbac"
+	tridentBackendsMR    string = "trident-backends"
+	tridentLifServicesMR string = "trident-lif-services" // New MR name for LIF services/endpoints
 
 	defaultChartPath = "charts/trident"
 )
@@ -136,7 +134,7 @@ type actuator struct {
 // Reconcile handles extension creation and updates.
 func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
 	a.shootNamespace = ex.Namespace
-	ontapConfig := &v1alpha1.TridentConfig{}
+	ontapConfig := &ontapv1alpha1.TridentConfig{}
 	if ex.Spec.ProviderConfig != nil {
 		_, _, err := a.decoder.Decode(ex.Spec.ProviderConfig.Raw, nil, ontapConfig)
 		if err != nil {
@@ -167,15 +165,13 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	projectId = strings.ReplaceAll(projectId, "-", "")
 
 	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLif)
-	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, a.shootNamespace, svmSeedSecretNamespace)
+	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, a.shootNamespace)
 	if err != nil {
 		return err
 	}
 
 	secretName := fmt.Sprintf(services.SecretNameFormat, projectId)
-	a.log.Info("Using credentials from secret in shoot cluster",
-		"secretName", secretName,
-		"namespace", "kube-system")
+	a.log.Info("Using credentials from secret in shoot cluster", "secretName", secretName, "namespace", "kube-system")
 
 	// Define base paths correctly based on the actual structure
 	chartPath := defaultChartPath                            // "charts/trident"
@@ -335,7 +331,7 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 // ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
-func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, SvmIpaddresses common.SvmIpaddresses, projectId string, shootNamespace string, svmSeedSecretNamespace string) error {
+func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
 	_, err := services.GetSVMByName(a.log, ontapClient, projectId)
 	if err != nil {
 		if errors.Is(err, services.ErrNotFound) {

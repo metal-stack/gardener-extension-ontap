@@ -55,8 +55,8 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 	}
 	password, err := createONTAPUserForSVM(ctx, log, opts.SeedClient, ontapClient, ontapUserOpts)
 	// If the secret doesn't exist in the seed that means, this is the first shoot therefore we need to create it.
-	log.Info("err", "err after create", err)
 	if err != nil {
+		log.Error(err, "unable to create svm user")
 		if errors.Is(err, ErrSeedSecretMissing) {
 			log.Info("seed Secret missing for first shoot, creating...")
 			tridentSecret := buildSecret(secretName, DefaultSVMUsername, password, opts.ProjectID, opts.SvmSeedSecretNamespace)
@@ -67,10 +67,6 @@ func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *onta
 			return nil
 		}
 		return fmt.Errorf("error occurred during creation of ontap user for svm %w", err)
-	}
-	// Create the secret name with project ID
-	if err != nil {
-		return fmt.Errorf("failed to deploy secret: %w", err)
 	}
 	log.Info("User created with vsadmin role and secret deployed successfully", "projectId", opts.ProjectID, "secretName", secretName)
 	return nil
@@ -83,7 +79,7 @@ func createONTAPUserForSVM(ctx context.Context, log logr.Logger, seedClient clie
 
 	// Handle case where user ALREADY EXISTS on ONTAP
 	log.Info("Checking K8s secret status for existing ONTAP user", "username", opts.Username, "svm", opts.SvmName)
-	passwordFromSecret, secretErr := checkIfAccountExistsForSvm(ctx, log, seedClient, ontapClient, opts.Username, opts.SvmName, opts.KubeSeedSecretNs)
+	passwordFromSecret, secretErr := checkIfAccountExistsForSvm(ctx, log, seedClient, opts.SvmName, opts.KubeSeedSecretNs)
 
 	// Secret also exists and is valid.
 	if errors.Is(secretErr, ErrAlreadyExists) {
@@ -138,7 +134,7 @@ type DeployTridentSecretsOptions struct {
 	Password       strfmt.Password
 }
 
-func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient client.Client, ontapClient *ontapv1.Ontap, accountName string, svmName string, kubeSeedSecret string) (string, error) {
+func checkIfAccountExistsForSvm(ctx context.Context, log logr.Logger, seedClient client.Client, svmName string, kubeSeedSecret string) (string, error) {
 	// Check if secret exists in the kube-system namespace in seed
 	secretName := fmt.Sprintf(SecretNameFormat, svmName)
 	existingSecret := &corev1.Secret{}

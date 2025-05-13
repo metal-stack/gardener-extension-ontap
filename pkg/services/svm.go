@@ -16,7 +16,7 @@ import (
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/metal-stack/gardener-extension-ontap/pkg/common"
+	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 )
 
 var (
@@ -28,10 +28,19 @@ var (
 	ErrSeedSecretMissing = errors.New("SeedSecretMissing")
 )
 
+// NetworkTags for SVM network interfaces
+const (
+	// dataLifTag is the tag used to identify data network interfaces
+	dataLifTag = "datalif"
+
+	// managementLifTag is the tag used to identify management network interfaces
+	managementLifTag = "managementlif"
+)
+
 // CreateSVMOptions holds the parameters required for CreateSVM function.
 type CreateSVMOptions struct {
 	ProjectID              string
-	SvmIpaddresses         common.SvmIpaddresses
+	SvmIpaddresses         ontapv1alpha1.SvmIpaddresses
 	SvmSeedSecretNamespace string
 }
 
@@ -94,7 +103,7 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 		SvmUUID:   svmUUID,
 		SvmName:   opts.ProjectID,
 		IPAddress: opts.SvmIpaddresses.DataLif,
-		LifName:   common.DataLifTag,
+		LifName:   dataLifTag,
 		NodeUUID:  nodeUUID,
 		IsDataLif: true,
 	}
@@ -108,7 +117,7 @@ func CreateSVM(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap,
 		SvmUUID:   svmUUID,
 		SvmName:   opts.ProjectID,
 		IPAddress: opts.SvmIpaddresses.ManagementLif,
-		LifName:   common.ManagementLifTag,
+		LifName:   managementLifTag,
 		NodeUUID:  nodeUUID,
 		IsDataLif: false,
 	}
