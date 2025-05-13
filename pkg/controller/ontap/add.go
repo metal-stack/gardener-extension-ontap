@@ -57,7 +57,7 @@ func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddO
 		return err
 	}
 
-	return extension.Add(ctx, mgr, extension.AddArgs{
+	return extension.Add(mgr, extension.AddArgs{
 		Actuator:          actuator,
 		ControllerOptions: opts.ControllerOptions,
 		Name:              ControllerName,
