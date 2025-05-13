@@ -306,42 +306,6 @@ func (m *SvnManager) createNetworkInterfaceForSvm(opts CreateNetworkInterfaceOpt
 	return nil
 }
 
-// FIXME What is the purpos of this func ? Not used anywhere
-func (m *SvnManager) GetAllSVM() error {
-	m.log.Info("Fetching all SVMs...")
-
-	if m.ontapClient == nil || m.ontapClient.SVM == nil {
-		return fmt.Errorf("API client or SVM service is not initialized")
-	}
-
-	params := s_vm.NewSvmCollectionGetParams()
-	svmGetOK, err := m.ontapClient.SVM.SvmCollectionGet(params, nil)
-	if err != nil {
-		return fmt.Errorf("failed to fetch SVMs: %w", err)
-	}
-
-	if svmGetOK == nil || svmGetOK.Payload == nil {
-		m.log.Info("No SVM data available.")
-		return nil
-	}
-
-	if svmGetOK.Payload.NumRecords != nil {
-		m.log.Info("number of SVM records", "count", *svmGetOK.Payload.NumRecords)
-	} else {
-		m.log.Info("number of SVM records is not available.")
-	}
-
-	for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
-		if svm.UUID != nil && svm.Name != nil {
-			m.log.Info("svm", "uuid", *svm.UUID, "name", *svm.Name)
-		} else {
-			m.log.Info("One of the required SVM details (UUID or Name) is not available.")
-		}
-	}
-
-	return nil
-}
-
 // Returns a svm by inputting the svmName, i.e. projectId
 func (m *SvnManager) GetSVMByName(svmName string) (string, error) {
 
