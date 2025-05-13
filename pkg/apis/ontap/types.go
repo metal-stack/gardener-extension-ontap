@@ -1,7 +1,6 @@
 package ontap
 
 import (
-	"github.com/metal-stack/gardener-extension-ontap/pkg/common"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -13,8 +12,14 @@ type TridentConfig struct {
 	metav1.TypeMeta
 
 	// SvmIpaddresses are the ip addresses provided for the svm to create and/or call the endpoint
-	SvmIpaddresses common.SvmIpaddresses
+	SvmIpaddresses SvmIpaddresses
 }
 
-type Protocols []Protocol
-type Protocol string
+// SvmIpaddresses contains the network interface addresses for a Storage Virtual Machine (SVM)
+type SvmIpaddresses struct {
+	// DataLif is the IP address for data operations
+	DataLif string
+
+	// ManagementLif is the IP address for management operations
+	ManagementLif string
+}

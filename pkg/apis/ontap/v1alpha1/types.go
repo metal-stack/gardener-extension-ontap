@@ -3,8 +3,6 @@ package v1alpha1
 import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/metal-stack/gardener-extension-ontap/pkg/common"
 )
 
 const (
@@ -19,10 +17,17 @@ type TridentConfig struct {
 	metav1.TypeMeta `json:",inline"`
 
 	//SvmIpAddresses are the endpoints needed by the
-	SvmIpaddresses common.SvmIpaddresses `json:"svmIpaddresses,omitempty"`
+	SvmIpaddresses SvmIpaddresses `json:"svmIpaddresses,omitempty"`
 }
-type Protocols []Protocol
-type Protocol string
+
+// SvmIpaddresses contains the network interface addresses for a Storage Virtual Machine (SVM)
+type SvmIpaddresses struct {
+	// DataLif is the IP address for data operations
+	DataLif string `json:"dataLif,omitempty"`
+
+	// ManagementLif is the IP address for management operations
+	ManagementLif string `json:"managementLif,omitempty"`
+}
 
 func (config *TridentConfig) IsValid(log logr.Logger) bool {
 	// if slices.Contains(config.Protocols, "nvme") {

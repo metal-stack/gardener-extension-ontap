@@ -12,12 +12,12 @@ import (
 )
 
 const (
-	// Type is the type of Extension resource.
-	Type = "ontap"
+	// controllerType is the type of Extension resource.
+	controllerType = "ontap"
 	// ControllerName is the name of the registry cache service controller.
 	ControllerName = "ontap_controller"
-	// FinalizerSuffix is the finalizer suffix for the registry cache service controller.
-	FinalizerSuffix = "ontap"
+	// finalizerSuffix is the finalizer suffix for the registry cache service controller.
+	finalizerSuffix = "ontap"
 )
 
 var (
@@ -61,9 +61,9 @@ func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddO
 		Actuator:          actuator,
 		ControllerOptions: opts.ControllerOptions,
 		Name:              ControllerName,
-		FinalizerSuffix:   FinalizerSuffix,
+		FinalizerSuffix:   finalizerSuffix,
 		Resync:            0,
 		Predicates:        extension.DefaultPredicates(ctx, mgr, DefaultAddOptions.IgnoreOperationAnnotation),
-		Type:              Type,
+		Type:              controllerType,
 	})
 }
