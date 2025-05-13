@@ -22,7 +22,7 @@ import (
 var (
 	// ErrNotFound is returned if the svm was not found
 	ErrNotFound = errors.New("NotFound")
-	// ErrAlreadyExists is returned when the enitity already exists
+	// ErrAlreadyExists is returned when the entity already exists
 	ErrAlreadyExists = errors.New("AlreadyExists")
 
 	ErrSeedSecretMissing = errors.New("SeedSecretMissing")

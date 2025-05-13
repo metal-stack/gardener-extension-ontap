@@ -12,7 +12,7 @@ import (
 type TridentConfig struct {
 	metav1.TypeMeta
 
-	// SvmIpaddresses are the ip adresses provided for the svm to create and/or call the endpoint
+	// SvmIpaddresses are the ip addresses provided for the svm to create and/or call the endpoint
 	SvmIpaddresses common.SvmIpaddresses
 }
 
