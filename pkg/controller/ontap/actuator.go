@@ -46,6 +46,16 @@ const (
 	defaultChartPath = "charts/trident"
 )
 
+type actuator struct {
+	log            logr.Logger
+	ontap          *ontapv1.Ontap
+	client         client.Client
+	svnManager     *services.SvnManager
+	shootNamespace string
+	decoder        runtime.Decoder
+	config         config.ControllerConfiguration
+}
+
 // NewActuator returns an actuator responsible for Extension resources.
 func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
 	scheme := mgr.GetScheme()
@@ -55,12 +65,17 @@ func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, conf
 	if err != nil {
 		return nil, err
 	}
+
+	client := mgr.GetClient()
+
+	svnManager := services.NewSvnManager(log, ontap, client)
 	return &actuator{
-		log:     log,
-		ontap:   ontap,
-		client:  mgr.GetClient(),
-		decoder: serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-		config:  config,
+		log:        log,
+		ontap:      ontap,
+		client:     client,
+		svnManager: svnManager,
+		decoder:    serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
+		config:     config,
 	}, nil
 }
 
@@ -123,15 +138,6 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	return ontap, nil
 }
 
-type actuator struct {
-	log            logr.Logger
-	ontap          *ontapv1.Ontap
-	client         client.Client
-	shootNamespace string
-	decoder        runtime.Decoder
-	config         config.ControllerConfiguration
-}
-
 // Reconcile handles extension creation and updates.
 func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
 	a.shootNamespace = ex.Namespace
@@ -165,8 +171,8 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
 
-	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLif)
-	err := a.ensureSvmForProject(ctx, a.ontap, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
+	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLif)
+	err := a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
 	if err != nil {
 		return err
 	}
@@ -196,7 +202,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		UserName:       string(existingSecret.Data["username"]),
 		Password:       strfmt.Password(existingSecret.Data["password"]),
 	}
-	err = services.DeployTridentSecretsInShootAsMR(ctx, log, a.client, deployOpts)
+	err = a.svnManager.DeployTridentSecretsInShootAsMR(ctx, deployOpts)
 	if err != nil {
 		return fmt.Errorf("failed to deploy trident secrets as MR: %w", err)
 	}
@@ -332,8 +338,8 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 // ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
-func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
-	_, err := services.GetSVMByName(a.log, ontapClient, projectId)
+func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
+	_, err := a.svnManager.GetSVMByName(projectId)
 	if err != nil {
 		if errors.Is(err, services.ErrNotFound) {
 			a.log.Info("SVM not found, proceeding with creation", "projectId", projectId)
@@ -344,7 +350,7 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1
 				SvmSeedSecretNamespace: svmSeedSecretNamespace,
 			}
 
-			if err := services.CreateSVM(ctx, a.log, ontapClient, a.client, svmOpts); err != nil {
+			if err := a.svnManager.CreateSVM(ctx, svmOpts); err != nil {
 				return fmt.Errorf("failed to ensure SVM for project %s: %w", projectId, err)
 			}
 			a.log.Info("Successfully created SVM", "projectId", projectId)
