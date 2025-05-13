@@ -13,7 +13,7 @@ IGNORE_OPERATION_ANNOTATION := false
 WEBHOOK_CONFIG_URL          := localhost
 
 GOLANGCI_LINT_VERSION := v1.62.0
-GO_VERSION := 1.23
+GO_VERSION := 1.24
 
 ifeq ($(CI),true)
   DOCKER_TTY_ARG=""
@@ -66,7 +66,7 @@ clean:
 
 .PHONY: check-generate
 check-generate:
-	@$(REPO_ROOT)/vendor/github.com/gardener/gardener/hack/check-generate.sh $(REPO_ROOT)
+	@bash $(GARDENER_HACK_DIR)/check-generate.sh $(REPO_ROOT)
 
 .PHONY: generate
 generate: $(VGOPATH) $(HELM) $(YQ)

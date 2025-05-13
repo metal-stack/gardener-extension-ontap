@@ -6,19 +6,21 @@ import (
 	"os"
 
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/install"
+	"github.com/metal-stack/metal-lib/pkg/pointer"
 
 	corev1 "k8s.io/api/core/v1"
 
 	extensionscontroller "github.com/gardener/gardener/extensions/pkg/controller"
 	heartbeatcontroller "github.com/gardener/gardener/extensions/pkg/controller/heartbeat"
 	heartbeatcmd "github.com/gardener/gardener/extensions/pkg/controller/heartbeat/cmd"
+	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	ontapcmd "github.com/metal-stack/gardener-extension-ontap/pkg/cmd"
 	controller "github.com/metal-stack/gardener-extension-ontap/pkg/controller/ontap"
 
 	controllercmd "github.com/gardener/gardener/extensions/pkg/controller/cmd"
 	"github.com/gardener/gardener/extensions/pkg/util"
 	ghealth "github.com/gardener/gardener/pkg/healthz"
-	componentbaseconfig "k8s.io/component-base/config"
+	componentbaseconfig "k8s.io/component-base/config/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -135,7 +137,7 @@ func (options *Options) run(ctx context.Context) error {
 	ctrlConfig.Apply(&controller.DefaultAddOptions.Config)
 
 	options.controllerOptions.Completed().Apply(&controller.DefaultAddOptions.ControllerOptions)
-	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation)
+	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation, pointer.Pointer(extensionsv1alpha1.ExtensionClassShoot))
 	options.heartbeatOptions.Completed().Apply(&heartbeatcontroller.DefaultAddOptions)
 
 	if err := options.controllerSwitches.Completed().AddToManager(ctx, mgr); err != nil {
