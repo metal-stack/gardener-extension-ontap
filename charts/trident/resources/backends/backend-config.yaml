@@ -9,7 +9,5 @@ spec:
   storageDriverName: ontap-san
   sanType: nvme
   managementLIF: ontap-api
-  dataLIF: ontap-api-data
-  svm: ${PROJECT_ID}
   credentials:
     name: ontap-svm-${PROJECT_ID}-credentials

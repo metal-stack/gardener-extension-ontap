@@ -230,7 +230,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	if len(serviceYamls) > 0 {
 		replacements := map[string]string{
 			"${MANAGEMENT_LIF_IP}": ontapConfig.SvmIpaddresses.ManagementLif,
-			"${DATA_LIF_IP}":       ontapConfig.SvmIpaddresses.DataLif,
 		}
 		templatedServiceYamls := make(map[string][]byte, len(serviceYamls))
 		for name, content := range serviceYamls {
