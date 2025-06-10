@@ -32,9 +32,9 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Lint
-      uses: golangci/golangci-lint-action@v7
+      uses: golangci/golangci-lint-action@v8
       with:
-        args: --timeout=5m
+        args: --timeout=10m
 
     - name: Make tag
       run: |

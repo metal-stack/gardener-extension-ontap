@@ -97,10 +97,6 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 				Enabled: pointer.Pointer(true),
 				Allowed: pointer.Pointer(true),
 			},
-			Iscsi: &models.SvmInlineIscsi{
-				Enabled: pointer.Pointer(true),
-				Allowed: pointer.Pointer(true),
-			},
 		},
 	}
 
