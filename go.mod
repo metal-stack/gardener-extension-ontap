@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/ahmetb/gen-crd-api-reference-docs v0.3.0
+	github.com/avast/retry-go/v4 v4.6.1
 	github.com/gardener/gardener v1.114.3
 	github.com/go-logr/logr v1.4.2
 	github.com/go-openapi/strfmt v0.23.0

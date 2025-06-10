@@ -1,4 +1,4 @@
-FROM alpine:3.21
+FROM alpine:3.22
 WORKDIR /
 COPY charts /charts
 COPY bin/gardener-extension-ontap /gardener-extension-ontap
