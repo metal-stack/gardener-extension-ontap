@@ -232,7 +232,7 @@ func (m *SvnManager) getNodesForSvmCreation() (svmNodeUUID, interfaceNodeUUID st
 
 	// First, get all nodes with cluster information
 	nodeParams := cluster.NewNodesGetParams()
-	nodeParams.SetFields([]string{"uuid", "name", "cluster"})
+	nodeParams.SetFields([]string{"uuid", "name"})
 
 	nodeResult, err := m.ontapClient.Cluster.NodesGet(nodeParams, nil)
 	if err != nil {
@@ -241,10 +241,6 @@ func (m *SvnManager) getNodesForSvmCreation() (svmNodeUUID, interfaceNodeUUID st
 
 	if nodeResult.Payload == nil || len(nodeResult.Payload.NodeResponseInlineRecords) == 0 {
 		return "", "", errors.New("no nodes found in the cluster")
-	}
-
-	if len(nodeResult.Payload.NodeResponseInlineRecords) < 2 {
-		return "", "", errors.New("cluster must have at least 2 nodes for this configuration")
 	}
 
 	// Get all aggregates with volume count information
@@ -325,6 +321,16 @@ func (m *SvnManager) findPartnerNodeInSameCluster(selectedSvmNodeUUID string, al
 		}
 	}
 
+	//If no 2 nodes exist just take the one that is there
+	// Needed for testing environment or local environment for example
+	for _, nodeUUID := range allNodeUUIDs {
+		m.log.Info("nodeUUid and selectedNode UUID", "nodeUUid", nodeUUID, "selectedNodeUUID", selectedSvmNodeUUID)
+		if nodeUUID == selectedSvmNodeUUID {
+			m.log.Info("Selected partner node for interface creation", "svmNodeUUID", selectedSvmNodeUUID, "partnerNodeUUID", nodeUUID)
+			return nodeUUID, nil
+		}
+	}
+
 	return "", errors.New("no partner node found - cluster needs at least 2 nodes")
 }
 
@@ -362,7 +368,7 @@ func (m *SvnManager) createNetworkInterfaceForSvm(opts networkInterfaceOptions) 
 	}
 	// Add location information
 	location := &models.IPInterfaceInlineLocation{}
-	location.Node = &models.IPInterfaceInlineLocationInlineNode{
+	location.HomeNode = &models.IPInterfaceInlineLocationInlineHomeNode{
 		UUID: pointer.Pointer(opts.nodeUUID),
 	}
 	interfaceInfo.Location = location
