@@ -73,18 +73,18 @@ func NewSvnManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient clien
 func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error {
 	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLif", opts.SvmIpaddresses.DataLif)
 
-	// 1. Get a node for network interface placement and aggregate selection
-	nodeUUID, err := m.getFirstNodeInCluster()
+	// 1. Get nodes for SVM creation (least volumes) and interface placement (other node)
+	svmNodeUUID, interfaceNodeUUID, err := m.getNodesForSvmCreation()
 	if err != nil {
-		return fmt.Errorf("failed to get a node for SVM creation: %w", err)
+		return fmt.Errorf("failed to get nodes for SVM creation: %w", err)
 	}
 
 	// 2. Find a suitable aggregate on the selected node
-	chosenAggregateUUID, err := m.findSuitableAggregateForNode(nodeUUID)
+	chosenAggregateUUID, err := m.findSuitableAggregateForNode(svmNodeUUID)
 	if err != nil {
 		return fmt.Errorf("failed to find a suitable aggregate for SVM %s: %w", opts.ProjectID, err)
 	}
-	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID, "aggregateUUID", *chosenAggregateUUID, "nodeUUID", nodeUUID)
+	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID, "aggregateUUID", *chosenAggregateUUID, "svmNodeUUID", svmNodeUUID)
 
 	// 3. Create the SVM without network interfaces
 	params := &s_vm.SvmCreateParams{
@@ -114,13 +114,13 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	}
 	m.log.Info("SVM is ready", "projectId", opts.ProjectID, "uuid", svmUUID)
 
-	// 5. Create data LIF
+	// 5. Create data LIF on the interface node (different from SVM node for load balancing)
 	dataLifOpts := networkInterfaceOptions{
 		svmUUID:   svmUUID,
 		svmName:   opts.ProjectID,
 		ipAddress: opts.SvmIpaddresses.DataLif,
 		lifName:   dataLifTag,
-		nodeUUID:  nodeUUID,
+		nodeUUID:  interfaceNodeUUID,
 		isDataLif: true,
 	}
 	err = m.createNetworkInterfaceForSvm(dataLifOpts)
@@ -128,13 +128,13 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		return fmt.Errorf("failed to create data LIF for SVM %s: %w", opts.ProjectID, err)
 	}
 
-	// 6. Create management LIF
+	// 6. Create management LIF on the interface node
 	mgmtLifOpts := networkInterfaceOptions{
 		svmUUID:   svmUUID,
 		svmName:   opts.ProjectID,
 		ipAddress: opts.SvmIpaddresses.ManagementLif,
 		lifName:   managementLifTag,
-		nodeUUID:  nodeUUID,
+		nodeUUID:  interfaceNodeUUID,
 		isDataLif: false,
 	}
 	err = m.createNetworkInterfaceForSvm(mgmtLifOpts)
@@ -224,28 +224,108 @@ func (m *SvnManager) findSuitableAggregateForNode(nodeUUID string) (*string, err
 	return bestUUID, nil
 }
 
-// getFirstNodeInCluster fetches the first node name found in the ONTAP cluster
-// Needs to be changed, waiting for Netapp answer
-func (m *SvnManager) getFirstNodeInCluster() (string, error) {
-	m.log.Info("Fetching first available node in cluster...")
+// getNodesForSvmCreation fetches all nodes and returns the node with least volumes for SVM creation
+// and the other node for network interface creation
+// we use the other node for network interface, bc that way it distributes the volumes on both aggregates
+func (m *SvnManager) getNodesForSvmCreation() (svmNodeUUID, interfaceNodeUUID string, err error) {
+	m.log.Info("Fetching nodes and selecting optimal nodes for SVM and interface creation...")
 
-	params := cluster.NewNodesGetParams()
-	params.SetFields([]string{"uuid", "name"})
+	// First, get all nodes with cluster information
+	nodeParams := cluster.NewNodesGetParams()
+	nodeParams.SetFields([]string{"uuid", "name", "cluster"})
 
-	result, err := m.ontapClient.Cluster.NodesGet(params, nil)
+	nodeResult, err := m.ontapClient.Cluster.NodesGet(nodeParams, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch nodes: %w", err)
-	}
-	for _, node := range result.Payload.NodeResponseInlineRecords {
-		m.log.Info("Node in Response", "nodes", node)
+		return "", "", fmt.Errorf("failed to fetch nodes: %w", err)
 	}
 
-	if result.Payload == nil {
-		return "", errors.New("no node information returned")
+	if nodeResult.Payload == nil || len(nodeResult.Payload.NodeResponseInlineRecords) == 0 {
+		return "", "", errors.New("no nodes found in the cluster")
 	}
-	nodeUUID := *result.Payload.NodeResponseInlineRecords[0].UUID
 
-	return nodeUUID.String(), nil
+	if len(nodeResult.Payload.NodeResponseInlineRecords) < 2 {
+		return "", "", errors.New("cluster must have at least 2 nodes for this configuration")
+	}
+
+	// Get all aggregates with volume count information
+	// volumes belong to aggregates and aggregates belong to nodes
+	// so we have to fetch the aggregates in order to get how many volumes are on a node
+	aggrParams := storage.NewAggregateCollectionGetParams()
+	aggrParams.SetFields([]string{"uuid", "name", "node", "volume_count"})
+	aggrResult, err := m.ontapClient.Storage.AggregateCollectionGet(aggrParams, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to fetch aggregates: %w", err)
+	}
+
+	// Count volumes per node
+	volumeCountPerNode := make(map[string]int64)
+	allNodeUUIDs := make([]string, 0)
+
+	// Initialize all nodes with 0 volumes
+	for _, node := range nodeResult.Payload.NodeResponseInlineRecords {
+		if node.UUID != nil {
+			nodeUUID := string(*node.UUID)
+			volumeCountPerNode[nodeUUID] = 0
+			allNodeUUIDs = append(allNodeUUIDs, nodeUUID)
+		}
+	}
+
+	// Sum up volumes per node from aggregates
+	if aggrResult.Payload != nil && aggrResult.Payload.AggregateResponseInlineRecords != nil {
+		for _, aggr := range aggrResult.Payload.AggregateResponseInlineRecords {
+			if aggr.Node != nil && aggr.Node.UUID != nil && aggr.VolumeCount != nil {
+				nodeUUID := *aggr.Node.UUID
+				volumeCountPerNode[nodeUUID] += *aggr.VolumeCount
+				m.log.Info("Node volume count", "nodeUUID", nodeUUID, "aggregateName", *aggr.Name, "volumeCount", *aggr.VolumeCount)
+			}
+		}
+	}
+
+	// Find the node with minimum volumes for SVM creation
+	var selectedSvmNodeUUID string
+	minVolumeCount := int64(-1)
+
+	for nodeUUID, volumeCount := range volumeCountPerNode {
+		m.log.Info("Node volume summary", "nodeUUID", nodeUUID, "totalVolumes", volumeCount)
+
+		if minVolumeCount == -1 || volumeCount < minVolumeCount {
+			minVolumeCount = volumeCount
+			selectedSvmNodeUUID = nodeUUID
+		}
+	}
+
+	if selectedSvmNodeUUID == "" {
+		return "", "", errors.New("no suitable node found for SVM creation")
+	}
+
+	// Find the partner node in the same cluster using cluster information
+	selectedInterfaceNodeUUID, err := m.findPartnerNodeInSameCluster(selectedSvmNodeUUID, allNodeUUIDs)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to find partner node for interface creation: %w", err)
+	}
+
+	m.log.Info("Selected nodes", "svmNodeUUID", selectedSvmNodeUUID, "svmNodeVolumeCount", minVolumeCount,
+		"interfaceNodeUUID", selectedInterfaceNodeUUID, "interfaceNodeVolumeCount", volumeCountPerNode[selectedInterfaceNodeUUID])
+
+	return selectedSvmNodeUUID, selectedInterfaceNodeUUID, nil
+}
+
+// findPartnerNodeInSameCluster finds the partner node in the same cluster as the selected SVM node
+// For simplicity in typical 2-node setups, this returns the other available node
+// In multi-cluster environments, this could be enhanced with cluster-specific logic
+func (m *SvnManager) findPartnerNodeInSameCluster(selectedSvmNodeUUID string, allNodeUUIDs []string) (string, error) {
+	m.log.Info("Finding partner node for interface creation", "selectedSvmNodeUUID", selectedSvmNodeUUID)
+
+	// I believe that right now we use the mgmtinterface of one cluster from the admin secret meaning
+	// that if i fetch all Nodes from that admin secret, it returns(in our case) 2 Nodes, so the other node is the one we need for the interface creation
+	for _, nodeUUID := range allNodeUUIDs {
+		if nodeUUID != selectedSvmNodeUUID {
+			m.log.Info("Selected partner node for interface creation", "svmNodeUUID", selectedSvmNodeUUID, "partnerNodeUUID", nodeUUID)
+			return nodeUUID, nil
+		}
+	}
+
+	return "", errors.New("no partner node found - cluster needs at least 2 nodes")
 }
 
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
@@ -282,7 +362,7 @@ func (m *SvnManager) createNetworkInterfaceForSvm(opts networkInterfaceOptions) 
 	}
 	// Add location information
 	location := &models.IPInterfaceInlineLocation{}
-	location.HomeNode = &models.IPInterfaceInlineLocationInlineHomeNode{
+	location.Node = &models.IPInterfaceInlineLocationInlineNode{
 		UUID: pointer.Pointer(opts.nodeUUID),
 	}
 	interfaceInfo.Location = location
