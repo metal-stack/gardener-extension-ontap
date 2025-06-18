@@ -2,7 +2,6 @@ package ontap
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
@@ -11,7 +10,6 @@ import (
 	"github.com/gardener/gardener/pkg/apis/core/install"
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
-	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/services"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -28,25 +26,13 @@ import (
 
 // FIXME here the logic to deploy the trident operator
 
-const (
-	//Why hardcod
-	tridentCRDsName        string = "trident-crds"
-	tridentRbacMR          string = "trident-rbac"
-	tridentBackendsMR      string = "trident-backends"
-	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
-	svmSeedSecretNamespace string = "kube-system"
-
-	defaultChartPath = "charts/trident"
-)
-
 type actuator struct {
-	log            logr.Logger
-	ontap          *ontapv1.Ontap
-	client         client.Client
-	svnManager     *services.SvnManager
-	shootNamespace string
-	decoder        runtime.Decoder
-	config         config.ControllerConfiguration
+	log        logr.Logger
+	ontap      *ontapv1.Ontap
+	client     client.Client
+	svnManager *services.SvnManager
+	decoder    runtime.Decoder
+	config     config.ControllerConfiguration
 }
 
 // NewActuator returns an actuator responsible for Extension resources.
@@ -330,29 +316,29 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 	return nil
 }
 
-// ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
-func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
-	_, err := a.svnManager.GetSVMByName(projectId)
-	if err != nil {
-		if errors.Is(err, services.ErrNotFound) {
-			a.log.Info("SVM not found, proceeding with creation", "projectId", projectId)
+// // ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
+// func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
+// 	_, err := a.svnManager.GetSVMByName(projectId)
+// 	if err != nil {
+// 		if errors.Is(err, services.ErrNotFound) {
+// 			a.log.Info("SVM not found, proceeding with creation", "projectId", projectId)
 
-			svmOpts := services.CreateSVMOptions{
-				ProjectID:              projectId,
-				SvmIpaddresses:         SvmIpaddresses,
-				SvmSeedSecretNamespace: svmSeedSecretNamespace,
-			}
+// 			svmOpts := services.CreateSVMOptions{
+// 				ProjectID:              projectId,
+// 				SvmIpaddresses:         SvmIpaddresses,
+// 				SvmSeedSecretNamespace: svmSeedSecretNamespace,
+// 			}
 
-			if err := a.svnManager.CreateSVM(ctx, svmOpts); err != nil {
-				return fmt.Errorf("failed to ensure SVM for project %s: %w", projectId, err)
-			}
-			a.log.Info("Successfully created SVM", "projectId", projectId)
-			return nil
-		}
-		// Handle other errors from GetSVMByName
-		return fmt.Errorf("failed to check for existing SVM %s: %w", projectId, err)
-	}
+// 			if err := a.svnManager.CreateSVM(ctx, svmOpts); err != nil {
+// 				return fmt.Errorf("failed to ensure SVM for project %s: %w", projectId, err)
+// 			}
+// 			a.log.Info("Successfully created SVM", "projectId", projectId)
+// 			return nil
+// 		}
+// 		// Handle other errors from GetSVMByName
+// 		return fmt.Errorf("failed to check for existing SVM %s: %w", projectId, err)
+// 	}
 
-	a.log.Info("SVM already exists, skipping creation", "projectId", projectId)
-	return nil
-}
+// 	a.log.Info("SVM already exists, skipping creation", "projectId", projectId)
+// 	return nil
+// }
