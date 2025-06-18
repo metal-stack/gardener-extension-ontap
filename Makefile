@@ -13,7 +13,7 @@ IGNORE_OPERATION_ANNOTATION := false
 WEBHOOK_CONFIG_URL          := localhost
 
 GOLANGCI_LINT_VERSION := v1.62.0
-GO_VERSION := 1.23
+GO_VERSION := 1.24
 
 ifeq ($(CI),true)
   DOCKER_TTY_ARG=""
@@ -66,7 +66,7 @@ clean:
 
 .PHONY: check-generate
 check-generate:
-	@$(REPO_ROOT)/vendor/github.com/gardener/gardener/hack/check-generate.sh $(REPO_ROOT)
+	@bash $(GARDENER_HACK_DIR)/check-generate.sh $(REPO_ROOT)
 
 .PHONY: generate
 generate: $(VGOPATH) $(HELM) $(YQ)
@@ -90,7 +90,7 @@ push-to-gardener-local:
 		-tags 'osusergo netgo static_build' \
 		-o bin/gardener-extension-ontap \
 		./cmd/gardener-extension-ontap
-	docker build -f Dockerfile -t ghcr.io/metal-stack/gardener-extension-ontap:latest .
+	docker build -f Dockerfile.dev -t ghcr.io/metal-stack/gardener-extension-ontap:latest .
 	kind --name gardener-local load docker-image ghcr.io/metal-stack/gardener-extension-ontap:latest
 
 .PHONY: delete

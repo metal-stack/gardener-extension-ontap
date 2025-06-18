@@ -2,44 +2,44 @@
 
 This repository contains the Gardener extension controller for managing the NetApp ONTAP CSI Plugin.
 
+## Table of Contents
+- [Prerequisites](#prerequisites)
+- [Development Workflow](#development-workflow)
+- [Test Environment Setup](#test-environment-setup)
+- [Known Issues](#known-issues)
+- [TODO List](#todo-list)
+
+## Prerequisites
+
+- A local Gardener setup
+
 ## Development Workflow
 
-### Prerequisites
+### Setup Gardener Locally
 
-- A local Gardener setup.
-
-### Steps to Run Locally
-
-1. **Clone the Gardener Repository**
-
+1. Clone the Gardener Repository:
 ```bash
 git clone git@github.com:gardener/gardener.git
 ```
 
-2. Set Up Gardener Locally
-
-### Start a local Kubernetes cluster:
-
+2. Start a local Kubernetes cluster:
 ```bash
 make kind-up
 ```
 
-1. Deploy Gardener:
-
+3. Deploy Gardener:
 ```bash
-    make gardener-up
+make gardener-up
 ```
 
-2. Generate Helm Charts
-
-Run the following command to generate the required Helm charts:
+4. Generate Helm Charts:
 ```bash
 make generate
 ```
 
-### Deploy the Example Configuration
+### Deploy the Extension
 
-1. Apply the example configuration to your Gardener setup:
+1. Apply the example configuration:
 ```bash
 kubectl apply -k example/
 ```
@@ -49,84 +49,167 @@ kubectl apply -k example/
 kubectl apply -f example/shoot.yaml
 ```
 
-### Pushing Code Changes Locally
+### Update Code Changes
 
-When making changes to the code, you can build and deploy the changes locally using:
-
+When making changes to the code, build and deploy locally using:
 ```bash
 make push-to-gardener-local
 ```
 
+### Access the Shoot Cluster
 
-# Sequence Diagram
+1. Adjust your `/etc/hosts` file:
+```bash
+cat <<EOF | sudo tee -a /etc/hosts
+# Begin of Gardener local setup section
+# Shoot API server domains
+172.18.255.1 api.local.local.external.local.gardener.cloud
+172.18.255.1 api.local.local.internal.local.gardener.cloud
+# Ingress
+172.18.255.1 p-seed.ingress.local.seed.local.gardener.cloud
+172.18.255.1 g-seed.ingress.local.seed.local.gardener.cloud
+172.18.255.1 gu-local--local.ingress.local.seed.local.gardener.cloud
+172.18.255.1 p-local--local.ingress.local.seed.local.gardener.cloud
+172.18.255.1 v-local--local.ingress.local.seed.local.gardener.cloud
+# End of Gardener local setup section
+EOF
+```
 
-<img src="sequence_diagram.drawio.svg">
-
-
-# Notes
-
-doc.go has been temporarily modified to bypass the use of VERSION. This needs to be fixed.
-
-./hack/usage/delete shoot local  garden-local # Deleting shoot cluster
-
-
-kubectl -n garden-<project-name> annotate shoot <shoot-name> gardener.cloud/operation=reconcile
-
-
-Still a bug:
-
-    Message:               error during apply of object "v1/ServiceAccount/trident/trident-operator": unable to get: trident/trident-operator because of unknown namespace for the cache
-
-make fetch virtuail k in metal deployment im controlplane directory, damit ich k create -k example/ für die ontap extension mache
-
-
-
+2. Generate the kubeconfig for the shoot cluster:
+```bash
 ./hack/usage/generate-admin-kubeconf.sh > admin-kubeconf.yaml
+```
 
+3. Trigger a reconciliation if needed:
+```bash
+kubectl -n garden-<project-name> annotate shoot <shoot-name> gardener.cloud/operation=reconcile
+```
 
-# For data LIF
-network interface create -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -lif data_lif -address 192.168.10.40 -netmask 255.255.255.0 -home-node fsqe-snc1-01 -home-port e0b -status-admin up
+## Test Environment Setup
 
-# For management LIF
-network interface create -vserver b5f26a3b9a4d48dba6b3d1dd4ac4abec -lif mgmt_lif -address 192.168.10.41 -netmask 255.255.255.0 -home-node fsqe-snc1-01 -home-port e0b -firewall-policy mgmt -status-admin up
+To properly set up the test environment, we need to configure network translation between the external IPs (10.x) and internal KVM network (192.168.x).
 
+### Simulator Host Machine Configuration
 
+#### Cluster Management Interface
 
-apiVersion: trident.netapp.io/v1
-kind: TridentBackendConfig
+```bash
+# Port Forward rules
+sudo iptables -t nat -A PREROUTING -i lan0 -p tcp --dport 443 -d 10.130.184.5 -j DNAT --to-destination 192.168.10.11
+sudo iptables -t nat -A PREROUTING -i lan1 -p tcp --dport 443 -d 10.130.184.5 -j DNAT --to-destination 192.168.10.11
+
+# NAT rules
+sudo iptables -t nat -A POSTROUTING -o lan0 -p tcp --dport 443 -d 192.168.10.11 -j SNAT --to-source 10.130.184.5
+sudo iptables -t nat -A POSTROUTING -o lan1 -p tcp --dport 443 -d 192.168.10.11 -j SNAT --to-source 10.130.184.5
+
+# Forward rules
+sudo iptables -I FORWARD 1 -i lan0 -o br-ontap-data -d 192.168.10.11 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD 2 -i lan1 -o br-ontap-data -d 192.168.10.11 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD 3 -i br-ontap-data -o lan0 -s 192.168.10.11 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD 4 -i br-ontap-data -o lan1 -s 192.168.10.11 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+```
+
+#### SVM Management Interface
+
+```bash
+# Port Forward rules
+sudo iptables -t nat -A PREROUTING -i lan0 -p tcp --dport 443 -d 10.130.184.6 -j DNAT --to-destination 192.168.10.29
+sudo iptables -t nat -A PREROUTING -i lan1 -p tcp --dport 443 -d 10.130.184.6 -j DNAT --to-destination 192.168.10.29
+
+# NAT rules
+sudo iptables -t nat -A POSTROUTING -o lan0 -p tcp --dport 443 -d 192.168.10.29 -j SNAT --to-source 10.130.184.6
+sudo iptables -t nat -A POSTROUTING -o lan1 -p tcp --dport 443 -d 192.168.10.29 -j SNAT --to-source 10.130.184.6
+
+# Forward rules
+sudo iptables -I FORWARD 1 -i lan0 -o br-ontap-data -d 192.168.10.29 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD 2 -i lan1 -o br-ontap-data -d 192.168.10.29 -p tcp --dport 443 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD 3 -i br-ontap-data -o lan0 -s 192.168.10.29 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD 4 -i br-ontap-data -o lan1 -s 192.168.10.29 -p tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+```
+
+#### SVM Data Interface
+
+```bash
+# Port Forward rules
+sudo iptables -t nat -A PREROUTING -i lan0 -p tcp --dport 4420 -d 10.130.184.7 -j DNAT --to-destination 192.168.10.30
+sudo iptables -t nat -A PREROUTING -i lan1 -p tcp --dport 4420 -d 10.130.184.7 -j DNAT --to-destination 192.168.10.30
+
+# NAT rules
+sudo iptables -t nat -A POSTROUTING -o lan0 -p tcp --dport 4420 -j SNAT --to-source 10.130.184.7
+sudo iptables -t nat -A POSTROUTING -o lan1 -p tcp --dport 4420 -d 192.168.10.30 -j SNAT --to-source 10.130.184.7
+
+# Forward rules
+sudo iptables -I FORWARD 1 -i lan0 -o br-ontap-data -d 192.168.10.30 -p tcp --dport 4420 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD 2 -i lan1 -o br-ontap-data -d 192.168.10.30 -p tcp --dport 4420 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD 3 -i br-ontap-data -o lan0 -s 192.168.10.30 -p tcp --sport 4420 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD 4 -i br-ontap-data -o lan1 -s 192.168.10.30 -p tcp --sport 4420 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+```
+
+### Worker Node Configuration
+
+Configure the worker node with these rules:
+
+```bash
+iptables -t nat -A OUTPUT -d 192.168.10.30 -j DNAT --to-destination 10.130.184.7
+iptables -t nat -A OUTPUT -d 192.168.10.30 -p tcp --dport 4420 -j DNAT --to-destination 10.130.184.7:4420
+iptables -t nat -A POSTROUTING -d 10.130.184.7 -j MASQUERADE
+
+echo "10.130.184.7 192.168.10.30" >> /etc/hosts
+```
+
+### Required Network Policies
+
+#### Clusterwidewide Network Policy in Shoot:
+
+```bash
+apiVersion: metal-stack.io/v1
+kind: ClusterwideNetworkPolicy
 metadata:
-  name: ontap-backend
-  namespace: kube-system
+  namespace: firewall
+  name: allow-nvme-port
 spec:
-  version: 1
-  backendName: testName
-  storageDriverName: ontap-nas
-  managementLIF: 192.168.10.11
-  dataLIF: 192.168.10.21
-  svm: vs1
-  credentials:
-    name: ontap-credentials
+  egress:
+  - to:
+    - cidr: 10.130.184.7/32
+    ports:
+    - protocol: TCP
+      port: 4420
+```
 
+#### Clusterwidewide Network Policy in Seed:
 
-apiVersion: v1
-kind: Secret
+```bash
+apiVersion: metal-stack.io/v1
+kind: ClusterwideNetworkPolicy
 metadata:
-  name: ontap-credentials
-  namespace: kube-system
-type: Opaque
-data:
-  password: ZnNxZTIwMjA=
-  username: YWRtaW4=
-
-
-kind: PersistentVolumeClaim
-apiVersion: v1
-metadata:
-  name: basic
+  namespace: firewall
+  name: allow-mgmt-port
 spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-  storageClassName: ontap-gold
+  egress:
+  - to:
+    - cidr: 10.130.184.5/32
+    ports:
+    - protocol: TCP
+      port: 443
+```
+
+## Known Issues
+
+- In local environments, using the "Default" broadcast domain can result in "no route to host" errors. Using "Default-1" broadcast domain resolves this issue.
+- On test environments, the opposite is true - "Default" works but "Default-1" fails.
+- In the simulator, ports e0c and e0d are not functional. Use only e0a and e0b.
+- The Trident NVMe driver automatically uses network interfaces that are internally assigned. See [Trident issue #1007](https://github.com/NetApp/trident/issues/1007) for details.
+- When an SVM already exists, the secret in the shoot isn't created because it assumes the secret is already in the seed.
+
+## TODO List
+
+- Fix SVM secret creation when SVM already exists
+- Implement proper SVM deletion logic
+- Add default gateway/routing configuration for SVMs
+- Fix hardcoded password in the `GenerateSecurePassword` function
+- Add MetroCluster and SVM mirroring support
+- Implement network route creation after SVM setup
+- Configure volume encryption for enhanced security
+- Add monitoring and alerting for SVM health
+- Create proper cleanup and lifecycle management
+- Set up automatic failover configuration

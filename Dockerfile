@@ -5,7 +5,7 @@ COPY . .
 RUN make install \
  && strip /go/bin/gardener-extension-ontap
 
-FROM alpine:3.21
+FROM alpine:3.22
 WORKDIR /
 COPY charts /charts
 COPY --from=builder /go/bin/gardener-extension-ontap /gardener-extension-ontap

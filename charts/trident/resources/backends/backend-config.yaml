@@ -6,10 +6,10 @@ metadata:
 spec:
   version: 1
   backendName: ontap-${PROJECT_ID}
-  storageDriverName: ontap-nas
-  managementLIF: ${MANAGEMENT_LIF}
-  dataLIF: ${DATA_LIF}
+  storageDriverName: ontap-san
+  sanType: nvme
+  managementLIF: ontap-api
+  dataLIF: ontap-api-data
   svm: ${PROJECT_ID}
   credentials:
-    name: ontap-${PROJECT_ID}-credentials
-    namespace: kube-system 
+    name: ontap-svm-${PROJECT_ID}-credentials

@@ -14,52 +14,34 @@ import (
 
 // Constants for paths and names
 const (
-	ResourcesDir          = "resources"
-	CRDsDir               = "crds"
-	BackendsDir           = "backends"
-	StorageClassFilename  = "storageclass.yaml"
-	BackendConfigFilename = "backend-config.yaml"
-	DefaultChartPath      = "charts/trident"
+	// Constants for directory names
+	storageClassFilename  = "storageclass.yaml"
+	backendConfigFilename = "backend-config.yaml"
 )
 
-func LoadYAMLFiles(dirPath string, excludeSubdirs ...string) (map[string][]byte, error) {
+// LoadYAMLFiles walks the given directory path and reads all YAML files,
+// returning them in a map where the key is the relative path with '/' replaced by '.'.
+func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	// Check if the base directory exists
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		// If the directory doesn't exist, return an empty map and no error,
-		// as it might be valid (e.g., no CRDs to load)
-		fmt.Printf("Directory does not exist, returning empty map: %s\n", dirPath)
-		return result, nil
-	}
-	excludeAbsPaths := make(map[string]bool)
-	for _, subDir := range excludeSubdirs {
-		if subDir != "" {
-			excludeAbsPaths[filepath.Join(dirPath, subDir)] = true
-		}
+		return result, fmt.Errorf("directory does not exist, returning empty map: %s", dirPath)
 	}
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err // Propagate errors (e.g., permission issues)
 		}
-		// Check if the current path is an excluded directory
 		if info.IsDir() {
-			if _, excluded := excludeAbsPaths[path]; excluded {
-				fmt.Printf("Excluding directory during YAML load: %s\n", path)
-				return filepath.SkipDir // Don't process this directory further
+			if path == dirPath {
+				return nil
 			}
-			return nil // Continue walking into non-excluded directories
-		}
-		// Process only YAML files
-		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml") {
 			return nil
 		}
-		// Skip kustomization files
-		if strings.HasSuffix(path, "kustomization.yaml") {
+		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml") {
 			return nil
 		}
 		relPath, err := filepath.Rel(dirPath, path)
 		if err != nil {
-			// Should generally not happen if walk starts correctly, but handle defensively
 			return fmt.Errorf("failed to get relative path for %s: %w", path, err)
 		}
 		data, err := os.ReadFile(path)
@@ -73,9 +55,8 @@ func LoadYAMLFiles(dirPath string, excludeSubdirs ...string) (map[string][]byte,
 	if err != nil {
 		return nil, fmt.Errorf("error walking %s: %w", dirPath, err)
 	}
-	// It's okay to return an empty map if no YAML files were found after exclusions
 	if len(result) == 0 {
-		fmt.Printf("No YAML files found in: %s (after potential exclusions)\n", dirPath)
+		return result, fmt.Errorf("no YAML files found in: %s", dirPath)
 	}
 	return result, nil
 }
@@ -83,6 +64,7 @@ func LoadYAMLFiles(dirPath string, excludeSubdirs ...string) (map[string][]byte,
 // DeployResources deploys the provided YAML data as a managed resource.
 func DeployResources(
 	ctx context.Context,
+	log logr.Logger,
 	k8sClient client.Client,
 	namespace string,
 	resourceName string,
@@ -90,12 +72,11 @@ func DeployResources(
 ) error {
 	// Check if there are any resources to deploy
 	if len(resourceYamls) == 0 {
-		fmt.Printf("No resources found to deploy for managed resource '%s' in namespace '%s'. Skipping deployment.\n", resourceName, namespace)
+		log.Info("no resources found to deploy for managed resource, skipping deployment", "name", resourceName, "namespace", namespace)
 		return nil
 	}
 
-	fmt.Printf("Deploying %d YAML files for managed resource '%s' in namespace '%s'\n",
-		len(resourceYamls), resourceName, namespace)
+	log.Info("deploying YAML files for managed resource", "name", resourceName, "namespace", namespace, "count", len(resourceYamls))
 
 	// Create the managed resource
 	if err := managedresources.CreateForShoot(
@@ -110,31 +91,24 @@ func DeployResources(
 		return fmt.Errorf("failed to create managed resource %s: %w", resourceName, err)
 	}
 
-	fmt.Printf("Successfully initiated deployment for managed resource '%s'\n", resourceName)
+	log.Info("successfully initiated deployment for managed resource", "name", resourceName)
 	return nil
 }
 
-// ProcessBackendTemplates processes the backend templates with the given parameters
-// and updates them in place in the chart directory
-func ProcessBackendTemplates(
-	log logr.Logger,
-	chartPath string,
-	projectId string,
-	secretName string,
-	dataLif string,
-	managementLif string,
-) error {
-	// Create backend directory path
-	backendDir := filepath.Join(chartPath, ResourcesDir, BackendsDir)
+// ProcessBackendTemplates reads backend templates, replaces placeholders, and writes the results back.
+// It now only replaces PROJECT_ID and SECRET_NAME as LIFs are handled by service FQDNs directly in the template.
+func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName string) error {
+	backendTemplateDir := filepath.Join(chartPath, "resources", "backends")
+	log.Info("Processing backend templates", "directory", backendTemplateDir)
 
 	// Ensure the backend directory exists
-	if err := os.MkdirAll(backendDir, 0755); err != nil {
-		return fmt.Errorf("failed to create backends directory: %w", err)
+	if err := os.MkdirAll(backendTemplateDir, 0755); err != nil {
+		return fmt.Errorf("failed to create backends directory %s: %w", backendTemplateDir, err)
 	}
 
 	// Read template files
-	storageClassPath := filepath.Join(backendDir, StorageClassFilename)
-	backendConfigPath := filepath.Join(backendDir, BackendConfigFilename)
+	storageClassPath := filepath.Join(backendTemplateDir, storageClassFilename)
+	backendConfigPath := filepath.Join(backendTemplateDir, backendConfigFilename)
 
 	// Read backend config template (if it exists)
 	backendConfigTemplate, err := os.ReadFile(backendConfigPath)
@@ -146,8 +120,6 @@ func ProcessBackendTemplates(
 	if len(backendConfigTemplate) > 0 {
 		backendConfigYaml := strings.ReplaceAll(string(backendConfigTemplate), "${PROJECT_ID}", projectId)
 		backendConfigYaml = strings.ReplaceAll(backendConfigYaml, "${SECRET_NAME}", secretName)
-		backendConfigYaml = strings.ReplaceAll(backendConfigYaml, "${DATA_LIF}", dataLif)
-		backendConfigYaml = strings.ReplaceAll(backendConfigYaml, "${MANAGEMENT_LIF}", managementLif)
 
 		if strings.Contains(backendConfigYaml, "${PROJECT_ID}") {
 			log.Info("Warning: ${PROJECT_ID} placeholders still exist after replacement. Doing additional replacement.")
@@ -160,7 +132,7 @@ func ProcessBackendTemplates(
 		log.Info("Updated backend config file with project values",
 			"path", backendConfigPath,
 			"projectId", projectId,
-			"dataLif", dataLif)
+			"secretName", secretName)
 	}
 	// Log the storage class path
 	log.Info("Storage class file ready for deployment", "path", storageClassPath)

@@ -31,6 +31,11 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Lint
+      uses: golangci/golangci-lint-action@v8
+      with:
+        args: --timeout=10m
+
     - name: Make tag
       run: |
         [ "${GITHUB_EVENT_NAME}" == 'pull_request' ] && echo "tag=${GITHUB_HEAD_REF##*/}" >> $GITHUB_ENV || true

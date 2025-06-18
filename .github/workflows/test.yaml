@@ -25,11 +25,10 @@ jobs:
       with:
         go-version-file: 'go.mod'
         cache: false
-
     - name: Lint
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
-        args: --build-tags integration -p bugs -p unused --timeout=3m
+        args: --timeout=10m
 
     - name: Test
       run: make test

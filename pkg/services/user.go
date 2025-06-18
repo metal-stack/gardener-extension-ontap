@@ -2,79 +2,170 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/gardener/gardener/pkg/client/kubernetes"
 	"github.com/gardener/gardener/pkg/utils/managedresources"
-	"github.com/go-logr/logr"
-	ontapv1 "github.com/metal-stack/ontap-go/api/client"
+	"github.com/metal-stack/metal-lib/pkg/pointer"
+	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/metal-stack/ontap-go/api/client/security"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // SVM user constants
 const (
-	DefaultSVMUsername = "vsadmin"
+	defaultSVMUsername = "svmAdmin"
 	SecretNameFormat   = "ontap-svm-%s-credentials" ////nolint:all
 )
 
-// CreateUserAndSecret creates an svm scoped account set to vsadmin role
-func CreateUserAndSecret(ctx context.Context, log logr.Logger, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string, seedClient client.Client, dataLif string, managementLif string) error {
-	log.Info("Creating user for SVM", "svm", projectId)
+// DeployTridentSecretsOptions holds parameters for DeployTridentSecretsInShootAsMR
+type DeployTridentSecretsOptions struct {
+	ProjectID      string
+	ShootNamespace string
+	SecretName     string
+	UserName       string
+	Password       strfmt.Password
+}
 
-	// Generate a secure password
-	password, err := GenerateSecurePassword()
-	if err != nil {
-		return fmt.Errorf("failed to generate secure password: %w", err)
-	}
+// userAndSecretOptions holds parameters for CreateUserAndSecret
+type userAndSecretOptions struct {
+	projectID              string
+	svmSeedSecretNamespace string
+	seedClient             client.Client
+	svmUUID                string
+}
 
+// ontapUserOptions holds parameters for CreateONTAPUserForSVM
+type ontapUserOptions struct {
+	username         string
+	svmName          string
+	kubeSeedSecretNs string
+	svmUUID          string
+}
+
+// CreateUserAndSecret creates an svm scoped account set to vsadmin role.
+func (m *SvnManager) CreateUserAndSecret(ctx context.Context, opts userAndSecretOptions) error {
+	m.log.Info("Creating user for SVM", "svm", opts.projectID)
+	secretName := fmt.Sprintf(SecretNameFormat, opts.projectID)
 	// Create or update user with the vsadmin role
-	err = CreateONTAPUserForSVM(ctx, log, ontapClient, DefaultSVMUsername, password, projectId)
-	if err != nil {
-		return fmt.Errorf("failed to create/update user: %w", err)
+	ontapUserOpts := ontapUserOptions{
+		username:         defaultSVMUsername,
+		svmName:          opts.projectID,
+		kubeSeedSecretNs: opts.svmSeedSecretNamespace,
+		svmUUID:          opts.svmUUID,
 	}
-
-	// Create the secret name with project ID
-	secretName := fmt.Sprintf(SecretNameFormat, projectId)
-
-	// Create/update secret with credentials
-	err = deployTridentSecrets(ctx, log, secretName, DefaultSVMUsername, strfmt.Password(password), projectId, shootNamespace, seedClient)
+	password, err := m.createONTAPUserForSVM(ctx, ontapUserOpts)
+	// If the secret doesn't exist in the seed that means, this is the first shoot therefore we need to create it.
 	if err != nil {
-		return fmt.Errorf("failed to deploy secret: %w", err)
+		m.log.Error(err, "unable to create svm user")
+		if errors.Is(err, ErrSeedSecretMissing) {
+			m.log.Info("seed Secret missing for first shoot, creating...")
+			tridentSecret := buildSecret(secretName, defaultSVMUsername, password, opts.projectID, opts.svmSeedSecretNamespace)
+			err := opts.seedClient.Create(ctx, tridentSecret)
+			if err != nil {
+				return fmt.Errorf("creating secret in seed failed: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("error occurred during creation of ontap user for svm %w", err)
 	}
-
-	log.Info("User created with vsadmin role and secret deployed successfully", "projectId", projectId, "secretName", secretName)
+	m.log.Info("User created with vsadmin role and secret deployed successfully", "projectId", opts.projectID, "secretName", secretName)
 	return nil
 }
 
-// ListAllUser lists all security users with their owners i.e. smv or cluster
-func checkIfAccountExistsForSvm(log logr.Logger, ontapClient *ontapv1.Ontap, accountName string, svmName string) error {
-	svmUid, err := GetSVMByName(log, ontapClient, svmName)
+// createONTAPUserForSVM checks if the user exists on ONTAP first, then potentially creates it.
+func (m *SvnManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOptions) (string, error) {
+
+	m.log.Info("Ensuring ONTAP user for SVM", "username", opts.username, "svm", opts.svmName)
+
+	// Handle case where user ALREADY EXISTS on ONTAP
+	m.log.Info("Checking K8s secret status for existing ONTAP user", "username", opts.username, "svm", opts.svmName)
+	passwordFromSecret, secretErr := m.checkIfAccountExistsForSvm(ctx, opts.svmName, opts.kubeSeedSecretNs)
+
+	// Secret also exists and is valid.
+	if errors.Is(secretErr, ErrAlreadyExists) {
+		m.log.Info("User exists on ONTAP and K8s secret is present", "username", opts.username, "svm", opts.svmName)
+		return passwordFromSecret, ErrAlreadyExists
+	}
+
+	// This block is only reached if userExistsOnOntap was determined to be false earlier.
+	password := generateSecurePassword()
+
+	application := "http"
+	authMethod := "password"
+	pwdVal := strfmt.Password(password)
+	vsadminRole := "vsadmin"
+
+	createAccountParams := security.NewAccountCreateParams()
+	createAccountParams.SetInfo(&models.Account{
+		Name:     pointer.Pointer(opts.username),
+		Password: &pwdVal,
+		Role: &models.AccountInlineRole{
+			Name: pointer.Pointer(vsadminRole),
+		},
+		Locked: pointer.Pointer(false),
+		Owner: &models.AccountInlineOwner{
+			UUID: pointer.Pointer(opts.svmUUID),
+		},
+		AccountInlineApplications: []*models.AccountApplication{
+			{
+				Application: &application,
+				AuthenticationMethods: []*string{
+					&authMethod,
+				},
+			},
+		},
+	})
+
+	_, createErr := m.ontapClient.Security.AccountCreate(createAccountParams, nil)
+	if createErr != nil {
+		return "", fmt.Errorf("failed to create ONTAP user '%s' for SVM '%s': %w", opts.username, opts.svmName, createErr)
+	}
+
+	m.log.Info("ONTAP user created successfully", "username", opts.username, "svm", opts.svmName, "role", vsadminRole)
+	return password, ErrSeedSecretMissing
+}
+
+func (m *SvnManager) checkIfAccountExistsForSvm(ctx context.Context, svmName string, kubeSeedSecret string) (string, error) {
+	// Check if secret exists in the kube-system namespace in seed
+	secretName := fmt.Sprintf(SecretNameFormat, svmName)
+	existingSecret := &corev1.Secret{}
+	err := m.seedClient.Get(ctx, client.ObjectKey{Namespace: kubeSeedSecret, Name: secretName}, existingSecret)
 	if err != nil {
-		return err
+		// If secret is missing in seed
+		if apierrors.IsNotFound(err) {
+			m.log.Info("Secret not found in seed", "secretName", secretName, "namespace", kubeSeedSecret)
+			return "", ErrSeedSecretMissing
+		}
+		m.log.Error(err, "Failed to get secret from seed", "secretName", secretName, "namespace", kubeSeedSecret)
+		return "", fmt.Errorf("failed to get secret %s from namespace %s: %w", secretName, kubeSeedSecret, err)
 	}
-
-	params := &security.AccountGetParams{Name: accountName, OwnerUUID: svmUid}
-	account, err := ontapClient.Security.AccountGet(params, nil)
-	if err != nil {
-		return fmt.Errorf("failed to get user: %w", err)
+	// Secret exists, check if password field is present and not empty
+	if password, ok := existingSecret.Data["password"]; ok && len(password) > 0 {
+		m.log.Info("Secret exists and contains a password", "secretName", secretName, "namespace", kubeSeedSecret)
+		return string(password), ErrAlreadyExists
 	}
+	m.log.Info("Secret exists but password field is missing or empty, considering it missing", "secretName", secretName, "namespace", kubeSeedSecret)
+	return "", ErrSeedSecretMissing
+}
 
-	if account.Payload.Name == nil {
-		return nil
-	}
-
-	return ErrAlreadyExists
+// very secure password for now
+// FIXME what is this for
+func generateSecurePassword() string {
+	return "fsqe2020"
 }
 
 // deployTridentSecrets creates or updates the secret for Trident
-func deployTridentSecrets(ctx context.Context, log logr.Logger, secretName string, userName string, password strfmt.Password, projectId string, shootNamespace string, seedClient client.Client) error {
-	// Create one secret in kube-system namespace that will be used by Trident backend config
-	tridentSecret := buildSecret(secretName, userName, password.String(), projectId, "kube-system")
+func (m *SvnManager) DeployTridentSecretsInShootAsMR(ctx context.Context, opts DeployTridentSecretsOptions) error {
+
+	// Create the secret in the shoot namespace instead of kube-system
+	tridentSecret := buildSecret(opts.SecretName, opts.UserName, string(opts.Password), opts.ProjectID, "kube-system")
 	clientObjs := []client.Object{tridentSecret}
 	shootResources, err := managedresources.
 		NewRegistry(kubernetes.ShootScheme, kubernetes.ShootCodec, kubernetes.ShootSerializer).
@@ -85,8 +176,8 @@ func deployTridentSecrets(ctx context.Context, log logr.Logger, secretName strin
 
 	err = managedresources.CreateForShoot(
 		ctx,
-		seedClient,
-		shootNamespace,
+		m.seedClient,
+		opts.ShootNamespace,
 		"trident-credentials",
 		"kube-system",
 		false,
@@ -95,9 +186,9 @@ func deployTridentSecrets(ctx context.Context, log logr.Logger, secretName strin
 	if err != nil {
 		return fmt.Errorf("failed to create ManagedResource for credentials: %w", err)
 	}
-	log.Info("Trident credentials secret created and confirmed healthy",
-		"projectId", projectId,
-		"shootNamespace", shootNamespace)
+	m.log.Info("Trident credentials secret created and confirmed healthy",
+		"projectId", opts.ProjectID,
+		"shootNamespace", opts.ShootNamespace)
 	return nil
 }
 
@@ -120,9 +211,4 @@ func buildSecret(secretName, userName, password, projectId, namespace string) *c
 			"password": password,
 		},
 	}
-}
-
-// not ready
-func GenerateSecurePassword() (string, error) {
-	return "123456789", nil
 }

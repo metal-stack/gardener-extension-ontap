@@ -11,44 +11,15 @@ import (
 type TridentConfig struct {
 	metav1.TypeMeta
 
-	// SVMName is the name of the storage virtual machine, can be a hostname or a ip address.
-	SVMName string
-
-	// Protocols to use to mount the volume, only NVMe is used for now.
-	Protocols Protocols
-
-	// SvmSecretRef references to the secret which contains the auth credentials and the lif ips to connect to the svm
-	SVMSecretRef string
-
-	// DataLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
-	DataLif string
-
-	// ManagementLif references to the secret which contains the auth credentials and the lif ips to connect to the svm
-	ManagementLif string
+	// SvmIpaddresses are the ip addresses provided for the svm to create and/or call the endpoint
+	SvmIpaddresses SvmIpaddresses
 }
 
-type Protocols []Protocol
-type Protocol string
+// SvmIpaddresses contains the network interface addresses for a Storage Virtual Machine (SVM)
+type SvmIpaddresses struct {
+	// DataLif is the IP address for data operations
+	DataLif string
 
-// # Auto generated ANF backend related fields consumed by the configurator controller.
-// anfConfigurator:
-//   enabled: false
-//   virtualNetwork: ""
-//   subnet: ""
-//   subscriptionID: ""
-//   tenantID: ""
-//   location: ""
-//   clientCredentials: ""
-//   capacityPools: []
-//   netappAccounts: []
-//   resourceGroups: []
-//   customerEncryptionKeys: {}
-
-// # Auto generated ONTAP backend related fields consumed by the configurator controller.
-// ontapConfigurator:
-//   enabled: false
-//   svms:
-//     - fsxnID: ''
-//       svmName: ''
-//       protocols: []
-//       authType: ''
+	// ManagementLif is the IP address for management operations
+	ManagementLif string
+}

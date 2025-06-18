@@ -2,16 +2,23 @@ package ontap
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	"github.com/gardener/gardener/pkg/utils/managedresources"
+	"github.com/go-openapi/strfmt"
 
 	"github.com/gardener/gardener/pkg/apis/core/install"
+	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
-
+	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
+	"github.com/metal-stack/gardener-extension-ontap/pkg/services"
+	"github.com/metal-stack/metal-lib/pkg/tag"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/types"
@@ -20,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
+	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
 	corev1 "k8s.io/api/core/v1"
@@ -28,10 +36,25 @@ import (
 // FIXME here the logic to deploy the trident operator
 
 const (
-	shootNamespace    string = "shoot--local--local"
-	tridentCRDsName   string = "trident-crds"
-	tridentOperatorMR string = "trident-operator"
+	//Why hardcod
+	tridentCRDsName        string = "trident-crds"
+	tridentRbacMR          string = "trident-rbac"
+	tridentBackendsMR      string = "trident-backends"
+	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
+	svmSeedSecretNamespace string = "kube-system"
+
+	defaultChartPath = "charts/trident"
 )
+
+type actuator struct {
+	log            logr.Logger
+	ontap          *ontapv1.Ontap
+	client         client.Client
+	svnManager     *services.SvnManager
+	shootNamespace string
+	decoder        runtime.Decoder
+	config         config.ControllerConfiguration
+}
 
 // NewActuator returns an actuator responsible for Extension resources.
 func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
@@ -42,12 +65,17 @@ func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, conf
 	if err != nil {
 		return nil, err
 	}
+
+	client := mgr.GetClient()
+
+	svnManager := services.NewSvnManager(log, ontap, client)
 	return &actuator{
-		log:     log,
-		ontap:   ontap,
-		client:  mgr.GetClient(),
-		decoder: serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-		config:  config,
+		log:        log,
+		ontap:      ontap,
+		client:     client,
+		svnManager: svnManager,
+		decoder:    serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
+		config:     config,
 	}, nil
 }
 
@@ -57,9 +85,9 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		return nil, fmt.Errorf("kubernetes client is not initialized")
 	}
 
-	if config.AdminAuthSecretRef == "" || config.ClusterManagementIp == "" || config.AuthSecretNamespace == "" {
-		return nil, fmt.Errorf("missing fields in config: AdminAuthSecretRef=%s, ClusterManagementIp=%s, AuthSecretNamespace=%s",
-			config.AdminAuthSecretRef, config.ClusterManagementIp, config.AuthSecretNamespace)
+	if config.AdminAuthSecretRef == "" || config.AuthSecretNamespace == "" {
+		return nil, fmt.Errorf("missing fields in config: AdminAuthSecretRef=%s, AuthSecretNamespace=%s",
+			config.AdminAuthSecretRef, config.AuthSecretNamespace)
 	}
 
 	var secret corev1.Secret
@@ -78,11 +106,10 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	}
 	clusterIp, ok := secret.Data["clusterIp"]
 	if !ok {
-		clusterIp = []byte(config.ClusterManagementIp)
-		fmt.Printf("Using clusterIp from config: %s\n", clusterIp)
+		return nil, fmt.Errorf("unable to fetch clusterip from authsecret")
 	}
 
-	log.Info("Connecting to ONTAP using: username=%s, host=%s\n", string(username), string(clusterIp))
+	log.Info("Connecting to ONTAP", "username", string(username), "host", string(clusterIp))
 
 	cfg := ontapclient.Config{
 		AdminUser:     string(username),
@@ -96,114 +123,176 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		return nil, fmt.Errorf("failed to create ONTAP API client: %w", err)
 	}
 
-	// params := s_vm.NewSvmCollectionGetParams()
-	// result, err := ontap.SVM.SvmCollectionGet(params, nil)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
-	// }
+	params := s_vm.NewSvmCollectionGetParams()
+	result, err := ontap.SVM.SvmCollectionGet(params, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
+	}
 
-	// numSVMs := 0
-	// if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
-	// 	numSVMs = int(*result.Payload.NumRecords)
-	// }
-	// log.Info("Successfully connected to ONTAP. Found %d existing SVMs\n", numSVMs)
+	numSVMs := 0
+	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
+		numSVMs = int(*result.Payload.NumRecords)
+	}
+	log.Info("Successfully connected to ONTAP. Found existing SVMs", "svms", numSVMs)
 
 	return ontap, nil
 }
 
-type actuator struct {
-	log     logr.Logger
-	ontap   *ontapv1.Ontap
-	client  client.Client
-	decoder runtime.Decoder
-	config  config.ControllerConfiguration
-}
-
 // Reconcile handles extension creation and updates.
 func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
-	// a.shootNamespace = ex.Namespace
-	// ontapConfig := &v1alpha1.TridentConfig{}
-	// if ex.Spec.ProviderConfig != nil {
-	// 	_, _, err := a.decoder.Decode(ex.Spec.ProviderConfig.Raw, nil, ontapConfig)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to decode provider config: %w", err)
-	// 	}
-	// }
+	a.shootNamespace = ex.Namespace
+	ontapConfig := &ontapv1alpha1.TridentConfig{}
+	if ex.Spec.ProviderConfig != nil {
+		_, _, err := a.decoder.Decode(ex.Spec.ProviderConfig.Raw, nil, ontapConfig)
+		if err != nil {
+			return fmt.Errorf("failed to decode provider config: %w", err)
+		}
+	}
 
 	// cluster := &extensionsv1alpha1.Cluster{}
 	// if err := a.client.Get(ctx, client.ObjectKey{Name: ex.Namespace}, cluster); err != nil {
 	// 	return fmt.Errorf("failed to get cluster object: %w", err)
 	// }
 
-	// shoot := &gardencorev1beta1.Shoot{}
-	// if cluster.Spec.Shoot.Raw != nil {
-	// 	if _, _, err := a.decoder.Decode(cluster.Spec.Shoot.Raw, nil, shoot); err != nil {
-	// 		log.Error(err, "failed to decode shoot, continuing with partial shoot object")
-	// 	}
-	// } else {
-	// 	return fmt.Errorf("shoot spec in cluster resource is empty")
-	// }
+	shoot := &gardencorev1beta1.Shoot{}
+	if cluster.Spec.Shoot.Raw != nil {
+		if _, _, err := a.decoder.Decode(cluster.Spec.Shoot.Raw, nil, shoot); err != nil {
+			log.Error(err, "failed to decode shoot, continuing with partial shoot object")
+		}
+	}
 
-	// a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
-	// var projectTag tag.TagMap = shoot.Annotations
-	// projectId, ok := projectTag.Value(tag.ClusterProject)
-	// if !ok || projectId == "" {
-	// 	return fmt.Errorf("no project ID found in shoot annotations")
-	// }
+	a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
+	var projectTag tag.TagMap = shoot.Annotations
+	projectId, ok := projectTag.Value(tag.ClusterProject)
+	a.log.Info("Found project ID in shoot annotations", "projectId", projectId)
+	if !ok || projectId == "" {
+		return fmt.Errorf("no project ID found in shoot annotations")
+	}
+	// Project id "-" to be replaced, ontap doesn't like "-"
+	projectId = strings.ReplaceAll(projectId, "-", "")
 
-	// projectId = strings.ReplaceAll(projectId, "-", "")
-	// a.log.Info("Found project ID in shoot annotations", "projectId", projectId)
+	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLif)
+	err := a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
+	if err != nil {
+		return err
+	}
 
-	// a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", a.shootNamespace)
-	// dataLif, managementLif, err := a.ensureSvmForProject(ctx, a.ontap, projectId, a.shootNamespace)
-	// if err != nil {
-	// 	return err
-	// }
+	secretName := fmt.Sprintf(services.SecretNameFormat, projectId)
+	a.log.Info("Using credentials from secret in shoot cluster", "secretName", secretName, "namespace", "kube-system")
 
-	// secretName := fmt.Sprintf(services.SecretNameFormat, projectId)
-	// a.log.Info("Using credentials from secret in shoot cluster",
-	// 	"secretName", secretName,
-	// 	"namespace", "kube-system")
+	// Define base paths correctly based on the actual structure
+	chartPath := defaultChartPath                            // "charts/trident"
+	resourcesPath := filepath.Join(chartPath, "resources")   // "charts/trident/resources"
+	rbacPath := filepath.Join(resourcesPath, "rbac")         // "charts/trident/resources/rbac"
+	crdPath := filepath.Join(resourcesPath, "crds")          // "charts/trident/resources/crds"
+	backendPath := filepath.Join(resourcesPath, "backends")  // "charts/trident/resources/backends"
+	servicesPath := filepath.Join(resourcesPath, "services") // "charts/trident/resources/services"
 
-	// chartPath := services.DefaultChartPath
-	// baseResourcePath := filepath.Join(chartPath, services.ResourcesDir)
-	// crdPath := filepath.Join(baseResourcePath, services.CRDsDir)
+	// get existing secret for svm in kube-system namespace
+	existingSecret := &corev1.Secret{}
+	err = a.client.Get(ctx, client.ObjectKey{Namespace: svmSeedSecretNamespace, Name: secretName}, existingSecret)
+	if err != nil {
+		return fmt.Errorf("failed to get secret: %w", err)
+	}
 
-	// // Process backend templates in place
-	// if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName, dataLif, managementLif); err != nil {
-	// 	return fmt.Errorf("failed to process backend templates: %w", err)
-	// }
+	deployOpts := services.DeployTridentSecretsOptions{
+		ProjectID:      projectId,
+		ShootNamespace: a.shootNamespace,
+		SecretName:     secretName,
+		UserName:       string(existingSecret.Data["username"]),
+		Password:       strfmt.Password(existingSecret.Data["password"]),
+	}
+	err = a.svnManager.DeployTridentSecretsInShootAsMR(ctx, deployOpts)
+	if err != nil {
+		return fmt.Errorf("failed to deploy trident secrets as MR: %w", err)
+	}
 
-	// // 1. Load and Deploy CRDs
-	// a.log.Info("Loading Trident CRDs", "path", crdPath)
-	// crdYamls, err := services.LoadYAMLFiles(crdPath)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to load Trident CRDs: %w", err)
-	// }
+	// 1. Load and Deploy CRDs
+	a.log.Info("Loading Trident CRDs", "path", crdPath)
+	crdYamls, err := services.LoadYAMLFiles(crdPath) // Load only from the correct crdPath
+	if err != nil {
+		return fmt.Errorf("failed to load Trident CRDs from %s: %w", crdPath, err)
+	}
+	if len(crdYamls) > 0 {
+		a.log.Info("Deploying Trident CRDs managed resource", "namespace", a.shootNamespace, "name", tridentCRDsName)
+		if err := services.DeployResources(ctx, a.log, a.client, a.shootNamespace, tridentCRDsName, crdYamls); err != nil {
+			return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
+		}
+		// Wait for CRD Managed Resource to be Ready
+		a.log.Info("Waiting for Trident CRDs managed resource to be ready", "name", tridentCRDsName)
+		if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentCRDsName); err != nil {
+			return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
+		}
+		a.log.Info("Trident CRDs managed resource is ready", "name", tridentCRDsName)
+	}
 
-	// a.log.Info("Deploying Trident CRDs managed resource", "namespace", a.shootNamespace)
-	// if err := services.DeployResources(ctx, a.client, a.shootNamespace, tridentCRDsName, crdYamls); err != nil {
-	// 	return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
-	// }
+	// 2. Load, Template, and Deploy LIF Services/Endpoints
+	a.log.Info("Loading LIF Service/Endpoints", "path", servicesPath)
+	serviceYamls, err := services.LoadYAMLFiles(servicesPath)
+	if err != nil {
+		return fmt.Errorf("failed to load LIF Service/Endpoints from %s: %w", servicesPath, err)
+	}
+	if len(serviceYamls) > 0 {
+		replacements := map[string]string{
+			"${MANAGEMENT_LIF_IP}": ontapConfig.SvmIpaddresses.ManagementLif,
+			"${DATA_LIF_IP}":       ontapConfig.SvmIpaddresses.DataLif,
+		}
+		templatedServiceYamls := make(map[string][]byte, len(serviceYamls))
+		for name, content := range serviceYamls {
+			templatedContent := string(content)
+			for placeholder, value := range replacements {
+				templatedContent = strings.ReplaceAll(templatedContent, placeholder, value)
+			}
+			templatedServiceYamls[name] = []byte(templatedContent)
+			a.log.Info("Templated LIF Service/Endpoint", "fileName", name, "content", templatedContent)
+		}
 
-	// // 2. Wait for CRD Managed Resource to be Ready
-	// a.log.Info("Waiting for Trident CRDs managed resource to be ready", "name", tridentCRDsName)
-	// if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentCRDsName); err != nil {
-	// 	return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
-	// }
-	// a.log.Info("Trident CRDs managed resource is ready")
-	// // 3. Load and Deploy Remaining Resources
-	// a.log.Info("Loading remaining Trident resources", "path", baseResourcePath, "excluding", services.CRDsDir)
-	// otherYamls, err := services.LoadYAMLFiles(baseResourcePath, services.CRDsDir) // Exclude CRDsDir
-	// if err != nil {
-	// 	return fmt.Errorf("failed to load remaining Trident resources: %w", err)
-	// }
-	// a.log.Info("Deploying Trident Operator managed resource", "namespace", ex.Namespace)
-	// err = services.DeployResources(ctx, a.client, ex.Namespace, tridentOperatorMR, otherYamls)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to create managed resources for Trident operator: %w", err)
-	// }
-	// a.log.Info("Trident Operator managed resource deployment initiated")
+		a.log.Info("Deploying LIF Services/Endpoints managed resource", "namespace", a.shootNamespace, "name", tridentLifServicesMR)
+		if err := services.DeployResources(ctx, a.log, a.client, a.shootNamespace, tridentLifServicesMR, templatedServiceYamls); err != nil {
+			return fmt.Errorf("failed to deploy LIF Services/Endpoints: %w", err)
+		}
+		a.log.Info("Waiting for LIF Services/Endpoints managed resource to be ready", "name", tridentLifServicesMR)
+		if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentLifServicesMR); err != nil {
+			return fmt.Errorf("failed while waiting for LIF Services/Endpoints managed resource: %w", err)
+		}
+		a.log.Info("LIF Services/Endpoints managed resource is ready", "name", tridentLifServicesMR)
+	}
+
+	// 3. Load and Deploy RBAC Resources
+	a.log.Info("Loading Trident RBAC resources", "path", rbacPath)
+	// Load only from the correct rbacPath, no exclusions needed as CRDs/Backends are separate dirs
+	rbacYamls, err := services.LoadYAMLFiles(rbacPath)
+	if err != nil {
+		return fmt.Errorf("failed to load Trident RBAC resources from %s: %w", rbacPath, err)
+	}
+	if len(rbacYamls) > 0 {
+		a.log.Info("Deploying Trident RBAC managed resource", "namespace", ex.Namespace, "name", tridentRbacMR)
+		err = services.DeployResources(ctx, a.log, a.client, ex.Namespace, tridentRbacMR, rbacYamls)
+		if err != nil {
+			return fmt.Errorf("failed to create managed resources for Trident RBAC: %w", err)
+		}
+		a.log.Info("Trident RBAC managed resource deployment initiated", "name", tridentRbacMR)
+	}
+	// 4. Process backend templates (only needs ProjectID now)
+	a.log.Info("Processing backend templates", "path", backendPath)
+	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName); err != nil {
+		return fmt.Errorf("failed to process backend templates: %w", err)
+	}
+	// 5. Load and Deploy Backend Resources
+	a.log.Info("Loading Trident Backend resources", "path", backendPath)
+	backendYamls, err := services.LoadYAMLFiles(backendPath) // Load only from the correct backendPath
+	if err != nil {
+		return fmt.Errorf("failed to load Trident Backend resources from %s: %w", backendPath, err)
+	}
+	if len(backendYamls) > 0 {
+		a.log.Info("Deploying Trident Backends managed resource", "namespace", ex.Namespace, "name", tridentBackendsMR)
+		err = services.DeployResources(ctx, a.log, a.client, ex.Namespace, tridentBackendsMR, backendYamls)
+		if err != nil {
+			return fmt.Errorf("failed to create managed resources for Trident Backends: %w", err)
+		}
+		a.log.Info("Trident Backends managed resource deployment initiated", "name", tridentBackendsMR)
+		// Consider waiting for Backend MR if needed.
+	}
 
 	a.log.Info("ONTAP extension reconciliation completed successfully")
 	return nil
@@ -211,13 +300,25 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 // Delete the Extension resource.
 func (a *actuator) Delete(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
-	if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentOperatorMR, false); err != nil {
-		return err
-	}
-	if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentOperatorMR); err != nil {
-		return err
-	}
-	log.Info("ManagedResource for Trident operator successfully deleted.")
+	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentBackendsMR, false); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentBackendsMR); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentRbacMR, false); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentRbacMR); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentCRDsName, false); err != nil {
+	// 	return err
+	// }
+	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentCRDsName); err != nil {
+	// 	return err
+	// }
+	// log.Info("ManagedResource for Trident operator successfully deleted.")
 	return nil
 }
 
@@ -236,49 +337,29 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 	return nil
 }
 
-// ensureSvmForProject creates an SVM for the project if it doesn't exist yet
-// func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string) (string, string, error) {
-// 	uuid, err := services.GetSVMByName(a.log, ontapClient, projectId)
-// 	if err != nil {
-// 		if errors.Is(err, services.ErrNotFound) {
-// 			a.log.Info("No SVM found with project ID, creating new SVM", "projectId", projectId)
+// ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
+func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
+	_, err := a.svnManager.GetSVMByName(projectId)
+	if err != nil {
+		if errors.Is(err, services.ErrNotFound) {
+			a.log.Info("SVM not found, proceeding with creation", "projectId", projectId)
 
-// 			dataLif, managementLif, err := services.CreateSVM(a.log, ontapClient, projectId)
-// 			if err != nil {
-// 				return "", "", fmt.Errorf("failed to create SVM or network interfaces: %w", err)
-// 			}
+			svmOpts := services.CreateSVMOptions{
+				ProjectID:              projectId,
+				SvmIpaddresses:         SvmIpaddresses,
+				SvmSeedSecretNamespace: svmSeedSecretNamespace,
+			}
 
-// 			a.log.Info("SVM creation completed", "projectId", projectId, "dataLif", dataLif, "managementLif", managementLif)
+			if err := a.svnManager.CreateSVM(ctx, svmOpts); err != nil {
+				return fmt.Errorf("failed to ensure SVM for project %s: %w", projectId, err)
+			}
+			a.log.Info("Successfully created SVM", "projectId", projectId)
+			return nil
+		}
+		// Handle other errors from GetSVMByName
+		return fmt.Errorf("failed to check for existing SVM %s: %w", projectId, err)
+	}
 
-// 			a.log.Info("Creating user and secret with network information",
-// 				"projectId", projectId,
-// 				"dataLif", dataLif,
-// 				"managementLif", managementLif)
-
-// 			if err = services.CreateUserAndSecret(ctx, a.log, ontapClient, projectId, shootNamespace, a.client, dataLif, managementLif); err != nil {
-// 				return "", "", fmt.Errorf("failed to create user and secret: %w", err)
-// 			}
-
-// 			return dataLif, managementLif, nil
-// 		}
-// 		return "", "", fmt.Errorf("error getting SVM by name: %w", err)
-// 	}
-
-// 	a.log.Info("SVM already exists", "projectId", projectId, "uuid", uuid)
-
-// 	dataLif, managementLif, err := services.GetSVMNetworkInterfaces(a.log, ontapClient, uuid)
-// 	if err != nil {
-// 		return "", "", fmt.Errorf("failed to get network interfaces for existing SVM: %w", err)
-// 	}
-
-// 	a.log.Info("Retrieved network interfaces for existing SVM",
-// 		"projectId", projectId,
-// 		"dataLif", dataLif,
-// 		"managementLif", managementLif)
-
-// 	if err = services.CreateUserAndSecret(ctx, a.log, ontapClient, projectId, shootNamespace, a.client, dataLif, managementLif); err != nil {
-// 		return "", "", fmt.Errorf("failed to create user and secret: %w", err)
-// 	}
-
-// 	return dataLif, managementLif, nil
-// }
+	a.log.Info("SVM already exists, skipping creation", "projectId", projectId)
+	return nil
+}

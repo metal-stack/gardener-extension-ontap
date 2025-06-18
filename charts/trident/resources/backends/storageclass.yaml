@@ -4,5 +4,5 @@ metadata:
   name: ontap-gold
 provisioner: csi.trident.netapp.io
 parameters:
-  backendType: "ontap-nas"
+  backendType: "ontap-san"
   provisioningType: "thick"
