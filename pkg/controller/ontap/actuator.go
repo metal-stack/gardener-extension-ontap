@@ -2,7 +2,6 @@ package ontap
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
@@ -12,7 +11,6 @@ import (
 	"github.com/gardener/gardener/pkg/apis/core/install"
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
-	"github.com/metal-stack/gardener-extension-ontap/pkg/services"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -114,12 +112,11 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 }
 
 type actuator struct {
-	log            logr.Logger
-	ontap          *ontapv1.Ontap
-	client         client.Client
-	shootNamespace string
-	decoder        runtime.Decoder
-	config         config.ControllerConfiguration
+	log     logr.Logger
+	ontap   *ontapv1.Ontap
+	client  client.Client
+	decoder runtime.Decoder
+	config  config.ControllerConfiguration
 }
 
 // Reconcile handles extension creation and updates.
@@ -240,48 +237,48 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 // ensureSvmForProject creates an SVM for the project if it doesn't exist yet
-func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string) (string, string, error) {
-	uuid, err := services.GetSVMByName(a.log, ontapClient, projectId)
-	if err != nil {
-		if errors.Is(err, services.ErrNotFound) {
-			a.log.Info("No SVM found with project ID, creating new SVM", "projectId", projectId)
+// func (a *actuator) ensureSvmForProject(ctx context.Context, ontapClient *ontapv1.Ontap, projectId string, shootNamespace string) (string, string, error) {
+// 	uuid, err := services.GetSVMByName(a.log, ontapClient, projectId)
+// 	if err != nil {
+// 		if errors.Is(err, services.ErrNotFound) {
+// 			a.log.Info("No SVM found with project ID, creating new SVM", "projectId", projectId)
 
-			dataLif, managementLif, err := services.CreateSVM(a.log, ontapClient, projectId)
-			if err != nil {
-				return "", "", fmt.Errorf("failed to create SVM or network interfaces: %w", err)
-			}
+// 			dataLif, managementLif, err := services.CreateSVM(a.log, ontapClient, projectId)
+// 			if err != nil {
+// 				return "", "", fmt.Errorf("failed to create SVM or network interfaces: %w", err)
+// 			}
 
-			a.log.Info("SVM creation completed", "projectId", projectId, "dataLif", dataLif, "managementLif", managementLif)
+// 			a.log.Info("SVM creation completed", "projectId", projectId, "dataLif", dataLif, "managementLif", managementLif)
 
-			a.log.Info("Creating user and secret with network information",
-				"projectId", projectId,
-				"dataLif", dataLif,
-				"managementLif", managementLif)
+// 			a.log.Info("Creating user and secret with network information",
+// 				"projectId", projectId,
+// 				"dataLif", dataLif,
+// 				"managementLif", managementLif)
 
-			if err = services.CreateUserAndSecret(ctx, a.log, ontapClient, projectId, shootNamespace, a.client, dataLif, managementLif); err != nil {
-				return "", "", fmt.Errorf("failed to create user and secret: %w", err)
-			}
+// 			if err = services.CreateUserAndSecret(ctx, a.log, ontapClient, projectId, shootNamespace, a.client, dataLif, managementLif); err != nil {
+// 				return "", "", fmt.Errorf("failed to create user and secret: %w", err)
+// 			}
 
-			return dataLif, managementLif, nil
-		}
-		return "", "", fmt.Errorf("error getting SVM by name: %w", err)
-	}
+// 			return dataLif, managementLif, nil
+// 		}
+// 		return "", "", fmt.Errorf("error getting SVM by name: %w", err)
+// 	}
 
-	a.log.Info("SVM already exists", "projectId", projectId, "uuid", uuid)
+// 	a.log.Info("SVM already exists", "projectId", projectId, "uuid", uuid)
 
-	dataLif, managementLif, err := services.GetSVMNetworkInterfaces(a.log, ontapClient, uuid)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get network interfaces for existing SVM: %w", err)
-	}
+// 	dataLif, managementLif, err := services.GetSVMNetworkInterfaces(a.log, ontapClient, uuid)
+// 	if err != nil {
+// 		return "", "", fmt.Errorf("failed to get network interfaces for existing SVM: %w", err)
+// 	}
 
-	a.log.Info("Retrieved network interfaces for existing SVM",
-		"projectId", projectId,
-		"dataLif", dataLif,
-		"managementLif", managementLif)
+// 	a.log.Info("Retrieved network interfaces for existing SVM",
+// 		"projectId", projectId,
+// 		"dataLif", dataLif,
+// 		"managementLif", managementLif)
 
-	if err = services.CreateUserAndSecret(ctx, a.log, ontapClient, projectId, shootNamespace, a.client, dataLif, managementLif); err != nil {
-		return "", "", fmt.Errorf("failed to create user and secret: %w", err)
-	}
+// 	if err = services.CreateUserAndSecret(ctx, a.log, ontapClient, projectId, shootNamespace, a.client, dataLif, managementLif); err != nil {
+// 		return "", "", fmt.Errorf("failed to create user and secret: %w", err)
+// 	}
 
-	return dataLif, managementLif, nil
-}
+// 	return dataLif, managementLif, nil
+// }
