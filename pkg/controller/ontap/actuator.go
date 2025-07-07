@@ -38,7 +38,7 @@ import (
 const (
 	//Why hardcod
 	tridentCRDsName        string = "trident-crds"
-	tridentRbacMR          string = "trident-rbac"
+	tridentInitMR          string = "trident-init"
 	tridentBackendsMR      string = "trident-backends"
 	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
 	svmSeedSecretNamespace string = "kube-system"
@@ -181,12 +181,12 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	a.log.Info("Using credentials from secret in shoot cluster", "secretName", secretName, "namespace", "kube-system")
 
 	// Define base paths correctly based on the actual structure
-	chartPath := defaultChartPath                            // "charts/trident"
-	resourcesPath := filepath.Join(chartPath, "resources")   // "charts/trident/resources"
-	rbacPath := filepath.Join(resourcesPath, "rbac")         // "charts/trident/resources/rbac"
-	crdPath := filepath.Join(resourcesPath, "crds")          // "charts/trident/resources/crds"
-	backendPath := filepath.Join(resourcesPath, "backends")  // "charts/trident/resources/backends"
-	servicesPath := filepath.Join(resourcesPath, "services") // "charts/trident/resources/services"
+	chartPath := defaultChartPath                                   // "charts/trident"
+	resourcesPath := filepath.Join(chartPath, "resources")          // "charts/trident/resources"
+	tridentInitPath := filepath.Join(resourcesPath, "trident-init") // "charts/trident/resources/trident-init"
+	crdPath := filepath.Join(resourcesPath, "crds")                 // "charts/trident/resources/crds"
+	backendPath := filepath.Join(resourcesPath, "backends")         // "charts/trident/resources/backends"
+	servicesPath := filepath.Join(resourcesPath, "services")        // "charts/trident/resources/services"
 
 	// get existing secret for svm in kube-system namespace
 	existingSecret := &corev1.Secret{}
@@ -258,20 +258,20 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		a.log.Info("LIF Services/Endpoints managed resource is ready", "name", tridentLifServicesMR)
 	}
 
-	// 3. Load and Deploy RBAC Resources
-	a.log.Info("Loading Trident RBAC resources", "path", rbacPath)
-	// Load only from the correct rbacPath, no exclusions needed as CRDs/Backends are separate dirs
-	rbacYamls, err := services.LoadYAMLFiles(rbacPath)
+	// 3. Load and Deploy Trident Init Resources
+	a.log.Info("Loading Trident Init resources", "path", tridentInitPath)
+	// Load only from the correct tridentInitPath, no exclusions needed as CRDs/Backends are separate dirs
+	tridentInitYamls, err := services.LoadYAMLFiles(tridentInitPath)
 	if err != nil {
-		return fmt.Errorf("failed to load Trident RBAC resources from %s: %w", rbacPath, err)
+		return fmt.Errorf("failed to load Trident Init resources from %s: %w", tridentInitPath, err)
 	}
-	if len(rbacYamls) > 0 {
-		a.log.Info("Deploying Trident RBAC managed resource", "namespace", ex.Namespace, "name", tridentRbacMR)
-		err = services.DeployResources(ctx, a.log, a.client, ex.Namespace, tridentRbacMR, rbacYamls)
+	if len(tridentInitYamls) > 0 {
+		a.log.Info("Deploying Trident Init managed resource", "namespace", ex.Namespace, "name", tridentInitMR)
+		err = services.DeployResources(ctx, a.log, a.client, ex.Namespace, tridentInitMR, tridentInitYamls)
 		if err != nil {
-			return fmt.Errorf("failed to create managed resources for Trident RBAC: %w", err)
+			return fmt.Errorf("failed to create managed resources for Trident Init: %w", err)
 		}
-		a.log.Info("Trident RBAC managed resource deployment initiated", "name", tridentRbacMR)
+		a.log.Info("Trident Init managed resource deployment initiated", "name", tridentInitMR)
 	}
 	// 4. Process backend templates (only needs ProjectID now)
 	a.log.Info("Processing backend templates", "path", backendPath)
@@ -306,10 +306,10 @@ func (a *actuator) Delete(ctx context.Context, log logr.Logger, ex *extensionsv1
 	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentBackendsMR); err != nil {
 	// 	return err
 	// }
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentRbacMR, false); err != nil {
+	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentInitMR, false); err != nil {
 	// 	return err
 	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentRbacMR); err != nil {
+	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentInitMR); err != nil {
 	// 	return err
 	// }
 	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentCRDsName, false); err != nil {
