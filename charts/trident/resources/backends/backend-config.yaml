@@ -13,3 +13,6 @@ spec:
   svm: ${PROJECT_ID}
   credentials:
     name: ontap-svm-${PROJECT_ID}-credentials
+  storage:
+  - labels:
+      luks: "true"
