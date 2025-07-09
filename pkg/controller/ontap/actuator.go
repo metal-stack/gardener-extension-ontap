@@ -129,9 +129,9 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
 	}
 
-	numSVMs := 0
+	var numSVMs int64
 	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
-		numSVMs = int(*result.Payload.NumRecords)
+		numSVMs = *result.Payload.NumRecords
 	}
 	log.Info("Successfully connected to ONTAP. Found existing SVMs", "svms", numSVMs)
 
@@ -141,69 +141,84 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 // Reconcile handles extension creation and updates.
 func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
 	a.shootNamespace = ex.Namespace
+
+	if ex.Spec.ProviderConfig == nil {
+		return fmt.Errorf("provider config is nil")
+	}
+
 	ontapConfig := &ontapv1alpha1.TridentConfig{}
-	if ex.Spec.ProviderConfig != nil {
-		_, _, err := a.decoder.Decode(ex.Spec.ProviderConfig.Raw, nil, ontapConfig)
-		if err != nil {
-			return fmt.Errorf("failed to decode provider config: %w", err)
-		}
+	if _, _, err := a.decoder.Decode(ex.Spec.ProviderConfig.Raw, nil, ontapConfig); err != nil {
+		return fmt.Errorf("failed to decode provider config: %w", err)
 	}
 
 	cluster := &extensionsv1alpha1.Cluster{}
 	if err := a.client.Get(ctx, client.ObjectKey{Name: ex.Namespace}, cluster); err != nil {
 		return fmt.Errorf("failed to get cluster object: %w", err)
 	}
+	if cluster.Spec.Shoot.Raw == nil {
+		return fmt.Errorf("cluster.spec.shoot.raw is nil")
+	}
 
 	shoot := &gardencorev1beta1.Shoot{}
-	if cluster.Spec.Shoot.Raw != nil {
-		if _, _, err := a.decoder.Decode(cluster.Spec.Shoot.Raw, nil, shoot); err != nil {
-			log.Error(err, "failed to decode shoot, continuing with partial shoot object")
-		}
+	if _, _, err := a.decoder.Decode(cluster.Spec.Shoot.Raw, nil, shoot); err != nil {
+		log.Error(err, "failed to decode shoot, continuing with partial shoot object")
 	}
 
 	a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
 	var projectTag tag.TagMap = shoot.Annotations
 	projectId, ok := projectTag.Value(tag.ClusterProject)
-	a.log.Info("Found project ID in shoot annotations", "projectId", projectId)
 	if !ok || projectId == "" {
 		return fmt.Errorf("no project ID found in shoot annotations")
 	}
+
+	a.log.Info("Found project ID in shoot annotations", "projectId", projectId)
 	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
 
 	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLif)
-	err := a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
-	if err != nil {
+	if err := a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace); err != nil {
 		return err
 	}
 
+	// FIXME let the trident deployer do the following work
+
+	// FIXME check username/passwort created per k8s cluster
 	secretName := fmt.Sprintf(services.SecretNameFormat, projectId)
 	a.log.Info("Using credentials from secret in shoot cluster", "secretName", secretName, "namespace", "kube-system")
 
 	// Define base paths correctly based on the actual structure
-	chartPath := defaultChartPath                            // "charts/trident"
-	resourcesPath := filepath.Join(chartPath, "resources")   // "charts/trident/resources"
-	rbacPath := filepath.Join(resourcesPath, "rbac")         // "charts/trident/resources/rbac"
-	crdPath := filepath.Join(resourcesPath, "crds")          // "charts/trident/resources/crds"
-	backendPath := filepath.Join(resourcesPath, "backends")  // "charts/trident/resources/backends"
-	servicesPath := filepath.Join(resourcesPath, "services") // "charts/trident/resources/services"
+	var (
+		chartPath     = defaultChartPath                         // "charts/trident"
+		resourcesPath = filepath.Join(chartPath, "resources")    // "charts/trident/resources"
+		rbacPath      = filepath.Join(resourcesPath, "rbac")     // "charts/trident/resources/rbac"
+		crdPath       = filepath.Join(resourcesPath, "crds")     // "charts/trident/resources/crds"
+		backendPath   = filepath.Join(resourcesPath, "backends") // "charts/trident/resources/backends"
+		servicesPath  = filepath.Join(resourcesPath, "services") // "charts/trident/resources/services"
+	)
 
 	// get existing secret for svm in kube-system namespace
 	existingSecret := &corev1.Secret{}
-	err = a.client.Get(ctx, client.ObjectKey{Namespace: svmSeedSecretNamespace, Name: secretName}, existingSecret)
-	if err != nil {
+	if err := a.client.Get(ctx, client.ObjectKey{Namespace: svmSeedSecretNamespace, Name: secretName}, existingSecret); err != nil {
 		return fmt.Errorf("failed to get secret: %w", err)
+	}
+
+	username, ok := existingSecret.Data["username"]
+	if !ok {
+		return fmt.Errorf("username not found in secret, secretname:%s", secretName)
+	}
+	password, ok := existingSecret.Data["password"]
+	if !ok {
+		return fmt.Errorf("password not found in secret secretname:%s", secretName)
 	}
 
 	deployOpts := services.DeployTridentSecretsOptions{
 		ProjectID:      projectId,
 		ShootNamespace: a.shootNamespace,
 		SecretName:     secretName,
-		UserName:       string(existingSecret.Data["username"]),
-		Password:       strfmt.Password(existingSecret.Data["password"]),
+		UserName:       string(username),
+		Password:       strfmt.Password(password),
 	}
-	err = a.svnManager.DeployTridentSecretsInShootAsMR(ctx, deployOpts)
-	if err != nil {
+	if err := a.svnManager.DeployTridentSecretsInShootAsMR(ctx, deployOpts); err != nil {
 		return fmt.Errorf("failed to deploy trident secrets as MR: %w", err)
 	}
 
