@@ -171,7 +171,8 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
 
-	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLif)
+	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace,
+		"managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLifs)
 	err := a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
 	if err != nil {
 		return err

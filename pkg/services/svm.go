@@ -71,7 +71,7 @@ func NewSvnManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient clien
 
 // CreateSVM creates an SVM and sets up network interfaces on a selected node
 func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error {
-	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLif", opts.SvmIpaddresses.DataLif)
+	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLif", opts.SvmIpaddresses.DataLifs)
 
 	// 1. Get a node for network interface placement and aggregate selection
 	nodeUUID, err := m.getFirstNodeInCluster()
@@ -114,18 +114,21 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	}
 	m.log.Info("SVM is ready", "projectId", opts.ProjectID, "uuid", svmUUID)
 
-	// 5. Create data LIF
-	dataLifOpts := networkInterfaceOptions{
-		svmUUID:   svmUUID,
-		svmName:   opts.ProjectID,
-		ipAddress: opts.SvmIpaddresses.DataLif,
-		lifName:   dataLifTag,
-		nodeUUID:  nodeUUID,
-		isDataLif: true,
-	}
-	err = m.createNetworkInterfaceForSvm(dataLifOpts)
-	if err != nil {
-		return fmt.Errorf("failed to create data LIF for SVM %s: %w", opts.ProjectID, err)
+	// 5. Create data LIFs
+	for _, datalifIp := range opts.SvmIpaddresses.DataLifs {
+		dataLifOpts := networkInterfaceOptions{
+			svmUUID:   svmUUID,
+			svmName:   opts.ProjectID,
+			ipAddress: datalifIp,
+			lifName:   dataLifTag,
+			// needs to be adjusted so ips are created distributed on both nodes, PR is open for this already
+			nodeUUID:  nodeUUID,
+			isDataLif: true,
+		}
+		err = m.createNetworkInterfaceForSvm(dataLifOpts)
+		if err != nil {
+			return fmt.Errorf("failed to create data LIF for SVM %s: %w", opts.ProjectID, err)
+		}
 	}
 
 	// 6. Create management LIF

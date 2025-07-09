@@ -10,6 +10,8 @@
 package v1alpha1
 
 import (
+	unsafe "unsafe"
+
 	ontap "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap"
 	conversion "k8s.io/apimachinery/pkg/conversion"
 	runtime "k8s.io/apimachinery/pkg/runtime"
@@ -46,7 +48,7 @@ func RegisterConversions(s *runtime.Scheme) error {
 }
 
 func autoConvert_v1alpha1_SvmIpaddresses_To_ontap_SvmIpaddresses(in *SvmIpaddresses, out *ontap.SvmIpaddresses, s conversion.Scope) error {
-	out.DataLif = in.DataLif
+	out.DataLifs = *(*[]string)(unsafe.Pointer(&in.DataLifs))
 	out.ManagementLif = in.ManagementLif
 	return nil
 }
@@ -57,7 +59,7 @@ func Convert_v1alpha1_SvmIpaddresses_To_ontap_SvmIpaddresses(in *SvmIpaddresses,
 }
 
 func autoConvert_ontap_SvmIpaddresses_To_v1alpha1_SvmIpaddresses(in *ontap.SvmIpaddresses, out *SvmIpaddresses, s conversion.Scope) error {
-	out.DataLif = in.DataLif
+	out.DataLifs = *(*[]string)(unsafe.Pointer(&in.DataLifs))
 	out.ManagementLif = in.ManagementLif
 	return nil
 }
