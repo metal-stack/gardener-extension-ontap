@@ -22,8 +22,8 @@ type TridentConfig struct {
 
 // SvmIpaddresses contains the network interface addresses for a Storage Virtual Machine (SVM)
 type SvmIpaddresses struct {
-	// DataLif is the IP address for data operations
-	DataLif string `json:"dataLif,omitempty"`
+	// DataLif are the IP addresses for data operations
+	DataLifs []string `json:"dataLif,omitempty"`
 
 	// ManagementLif is the IP address for management operations
 	ManagementLif string `json:"managementLif,omitempty"`

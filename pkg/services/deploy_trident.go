@@ -97,7 +97,7 @@ func DeployResources(
 
 // ProcessBackendTemplates reads backend templates, replaces placeholders, and writes the results back.
 // It now only replaces PROJECT_ID and SECRET_NAME as LIFs are handled by service FQDNs directly in the template.
-func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName string) error {
+func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName, managementIp string) error {
 	backendTemplateDir := filepath.Join(chartPath, "resources", "backends")
 	log.Info("Processing backend templates", "directory", backendTemplateDir)
 
@@ -124,6 +124,7 @@ func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName s
 		if strings.Contains(backendConfigYaml, "${PROJECT_ID}") {
 			log.Info("Warning: ${PROJECT_ID} placeholders still exist after replacement. Doing additional replacement.")
 			backendConfigYaml = strings.ReplaceAll(backendConfigYaml, "${PROJECT_ID}", projectId)
+			backendConfigYaml = strings.ReplaceAll(backendConfigYaml, "${MANAGEMENT_LIF_IP}", managementIp)
 		}
 
 		if err := os.WriteFile(backendConfigPath, []byte(backendConfigYaml), 0600); err != nil {

@@ -8,8 +8,7 @@ spec:
   backendName: ontap-${PROJECT_ID}
   storageDriverName: ontap-san
   sanType: nvme
-  managementLIF: ontap-api
-  dataLIF: ontap-api-data
+  managementLIF: ${MANAGEMENT_LIF_IP}
   svm: ${PROJECT_ID}
   credentials:
     name: ontap-svm-${PROJECT_ID}-credentials
