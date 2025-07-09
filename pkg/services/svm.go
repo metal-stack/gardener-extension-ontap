@@ -121,7 +121,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 			svmName:   opts.ProjectID,
 			ipAddress: datalifIp,
 			lifName:   dataLifTag,
-			// needs to be adjusted so ips are created distributed on both nodes, PR is open for this already
+			// TODO:needs to be adjusted so ips are created distributed on both nodes, PR is open for this already
 			nodeUUID:  nodeUUID,
 			isDataLif: true,
 		}
