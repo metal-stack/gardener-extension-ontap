@@ -172,7 +172,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	projectId = strings.ReplaceAll(projectId, "-", "")
 
 	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace,
-		"managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIp", ontapConfig.SvmIpaddresses.DataLifs)
+		"managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
 	err := a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
 	if err != nil {
 		return err

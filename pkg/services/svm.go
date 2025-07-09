@@ -71,7 +71,7 @@ func NewSvnManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient clien
 
 // CreateSVM creates an SVM and sets up network interfaces on a selected node
 func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error {
-	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLif", opts.SvmIpaddresses.DataLifs)
+	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLifs", opts.SvmIpaddresses.DataLifs)
 
 	// 1. Get a node for network interface placement and aggregate selection
 	nodeUUID, err := m.getFirstNodeInCluster()
