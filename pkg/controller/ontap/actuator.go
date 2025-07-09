@@ -186,7 +186,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	tridentInitPath := filepath.Join(resourcesPath, "trident-init") // "charts/trident/resources/trident-init"
 	crdPath := filepath.Join(resourcesPath, "crds")                 // "charts/trident/resources/crds"
 	backendPath := filepath.Join(resourcesPath, "backends")         // "charts/trident/resources/backends"
-	servicesPath := filepath.Join(resourcesPath, "services")        // "charts/trident/resources/services"
 
 	// get existing secret for svm in kube-system namespace
 	existingSecret := &corev1.Secret{}
@@ -226,39 +225,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		a.log.Info("Trident CRDs managed resource is ready", "name", tridentCRDsName)
 	}
 
-	// 2. Load, Template, and Deploy LIF Services/Endpoints
-	a.log.Info("Loading LIF Service/Endpoints", "path", servicesPath)
-	serviceYamls, err := services.LoadYAMLFiles(servicesPath)
-	if err != nil {
-		return fmt.Errorf("failed to load LIF Service/Endpoints from %s: %w", servicesPath, err)
-	}
-	if len(serviceYamls) > 0 {
-		replacements := map[string]string{
-			"${MANAGEMENT_LIF_IP}": ontapConfig.SvmIpaddresses.ManagementLif,
-			"${DATA_LIF_IP}":       ontapConfig.SvmIpaddresses.DataLif,
-		}
-		templatedServiceYamls := make(map[string][]byte, len(serviceYamls))
-		for name, content := range serviceYamls {
-			templatedContent := string(content)
-			for placeholder, value := range replacements {
-				templatedContent = strings.ReplaceAll(templatedContent, placeholder, value)
-			}
-			templatedServiceYamls[name] = []byte(templatedContent)
-			a.log.Info("Templated LIF Service/Endpoint", "fileName", name, "content", templatedContent)
-		}
-
-		a.log.Info("Deploying LIF Services/Endpoints managed resource", "namespace", a.shootNamespace, "name", tridentLifServicesMR)
-		if err := services.DeployResources(ctx, a.log, a.client, a.shootNamespace, tridentLifServicesMR, templatedServiceYamls); err != nil {
-			return fmt.Errorf("failed to deploy LIF Services/Endpoints: %w", err)
-		}
-		a.log.Info("Waiting for LIF Services/Endpoints managed resource to be ready", "name", tridentLifServicesMR)
-		if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentLifServicesMR); err != nil {
-			return fmt.Errorf("failed while waiting for LIF Services/Endpoints managed resource: %w", err)
-		}
-		a.log.Info("LIF Services/Endpoints managed resource is ready", "name", tridentLifServicesMR)
-	}
-
-	// 3. Load and Deploy Trident Init Resources
+	// 2. Load and Deploy Trident Init Resources
 	a.log.Info("Loading Trident Init resources", "path", tridentInitPath)
 	// Load only from the correct tridentInitPath, no exclusions needed as CRDs/Backends are separate dirs
 	tridentInitYamls, err := services.LoadYAMLFiles(tridentInitPath)
@@ -273,12 +240,12 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		}
 		a.log.Info("Trident Init managed resource deployment initiated", "name", tridentInitMR)
 	}
-	// 4. Process backend templates (only needs ProjectID now)
+	// 3. Process backend templates (only needs ProjectID now)
 	a.log.Info("Processing backend templates", "path", backendPath)
-	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName); err != nil {
+	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName, ontapConfig.SvmIpaddresses.ManagementLif); err != nil {
 		return fmt.Errorf("failed to process backend templates: %w", err)
 	}
-	// 5. Load and Deploy Backend Resources
+	// 4. Load and Deploy Backend Resources
 	a.log.Info("Loading Trident Backend resources", "path", backendPath)
 	backendYamls, err := services.LoadYAMLFiles(backendPath) // Load only from the correct backendPath
 	if err != nil {
