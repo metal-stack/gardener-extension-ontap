@@ -207,9 +207,53 @@ spec:
 - Implement proper SVM deletion logic
 - Add default gateway/routing configuration for SVMs
 - Fix hardcoded password in the `GenerateSecurePassword` function
-- Add MetroCluster and SVM mirroring support
 - Implement network route creation after SVM setup
-- Configure volume encryption for enhanced security
 - Add monitoring and alerting for SVM health
 - Create proper cleanup and lifecycle management
-- Set up automatic failover configuration
+
+# Creating ONTAP Encrypted Volumes
+
+To create an encrypted volume using NetApp Trident CSI, you need three components:
+
+## 1. Secret with LUKS Passphrase
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: luks-pvc1
+  namespace: kube-system
+stringData:
+  luks-passphrase-name: A
+  luks-passphrase: secretA
+```
+
+## 2. StorageClass with Encryption Annotations
+The StorageClass must include CSI node stage secret annotations:
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: luks
+provisioner: csi.trident.netapp.io
+parameters:
+  csi.storage.k8s.io/node-stage-secret-name: luks-pvc1
+  csi.storage.k8s.io/node-stage-secret-namespace: kube-system
+```
+
+## 3. PVC Using the Encrypted StorageClass
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+spec:
+  storageClassName: luks
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+## Key Requirements
+- Secret name in StorageClass must match actual secret name
+- Secret namespace in StorageClass must match where secret is created
+- PVC must reference the StorageClass with encryption annotations
