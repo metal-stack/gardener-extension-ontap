@@ -169,7 +169,11 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 			log.Error(err, "failed to decode shoot, continuing with partial shoot object")
 		}
 	}
-
+	// Create clusterwidenetworkpolicy
+	err := a.ensureClusterwideNetworkPolicy(ctx, ontapConfig.SvmIpaddresses)
+	if err != nil {
+		return fmt.Errorf("ensuring clusterwidenetworkpolicy for shoot failed", err)
+	}
 	a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
 	var projectTag tag.TagMap = shoot.Annotations
 	projectId, ok := projectTag.Value(tag.ClusterProject)
@@ -182,7 +186,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace,
 		"managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
-	err := a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
+	err = a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
 	if err != nil {
 		return err
 	}
