@@ -2,6 +2,7 @@ package ontap
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -14,14 +15,21 @@ import (
 
 	"github.com/gardener/gardener/pkg/apis/core/install"
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+
+	firewallv1 "github.com/metal-stack/firewall-controller/v2/api/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/services"
+	"github.com/metal-stack/metal-lib/pkg/pointer"
 	"github.com/metal-stack/metal-lib/pkg/tag"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -42,6 +50,7 @@ const (
 	tridentBackendsMR      string = "trident-backends"
 	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
 	svmSeedSecretNamespace string = "kube-system"
+	cwnpMR                 string = "cluster-wide-network-policy"
 
 	defaultChartPath = "charts/trident"
 )
@@ -160,7 +169,11 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 			log.Error(err, "failed to decode shoot, continuing with partial shoot object")
 		}
 	}
-
+	// Create clusterwidenetworkpolicy
+	err := a.ensureClusterwideNetworkPolicy(ctx, ontapConfig.SvmIpaddresses)
+	if err != nil {
+		return fmt.Errorf("ensuring clusterwidenetworkpolicy for shoot failed %w", err)
+	}
 	a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
 	var projectTag tag.TagMap = shoot.Annotations
 	projectId, ok := projectTag.Value(tag.ClusterProject)
@@ -173,7 +186,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace,
 		"managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
-	err := a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
+	err = a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace)
 	if err != nil {
 		return err
 	}
@@ -306,7 +319,7 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 // ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
-func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
+func (a *actuator) ensureSvmForProject(ctx context.Context, svmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
 	_, err := a.svnManager.GetSVMByName(projectId)
 	if err != nil {
 		if errors.Is(err, services.ErrNotFound) {
@@ -314,7 +327,7 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontap
 
 			svmOpts := services.CreateSVMOptions{
 				ProjectID:              projectId,
-				SvmIpaddresses:         SvmIpaddresses,
+				SvmIpaddresses:         svmIpaddresses,
 				SvmSeedSecretNamespace: svmSeedSecretNamespace,
 			}
 
@@ -329,5 +342,65 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontap
 	}
 
 	a.log.Info("SVM already exists, skipping creation", "projectId", projectId)
+	return nil
+}
+
+func (a *actuator) ensureClusterwideNetworkPolicy(ctx context.Context, svmIpaddresses ontapv1alpha1.SvmIpaddresses) error {
+
+	var egressRules []firewallv1.EgressRule
+
+	for _, datalif := range svmIpaddresses.DataLifs {
+		rule := firewallv1.EgressRule{
+			To: []networkingv1.IPBlock{
+				{
+					CIDR: datalif,
+				},
+			},
+			Ports: []networkingv1.NetworkPolicyPort{
+				{
+					Protocol: pointer.Pointer(corev1.ProtocolTCP),
+					Port:     &intstr.IntOrString{IntVal: 4420},
+				},
+			},
+		}
+		egressRules = append(egressRules, rule)
+	}
+
+	managementRule := firewallv1.EgressRule{
+		To: []networkingv1.IPBlock{
+			{
+				CIDR: svmIpaddresses.ManagementLif,
+			},
+		},
+		Ports: []networkingv1.NetworkPolicyPort{
+			{
+				Protocol: pointer.Pointer(corev1.ProtocolTCP),
+				Port:     &intstr.IntOrString{IntVal: 443},
+			},
+		},
+	}
+	egressRules = append(egressRules, managementRule)
+
+	cwnp := &firewallv1.ClusterwideNetworkPolicy{
+		ObjectMeta: v1.ObjectMeta{
+			Name: "allow-to-ontap",
+		},
+		Spec: firewallv1.PolicySpec{
+			Description: "ontap storage access",
+			Egress:      egressRules,
+		},
+	}
+
+	result := make(map[string][]byte)
+	jsonData, err := json.Marshal(cwnp)
+	if err != nil {
+		return fmt.Errorf("failed to marshal CRD: %w", err)
+	}
+
+	result["clusterwideNetworkPolicy"] = jsonData
+	if err := services.DeployResources(ctx, a.log, a.client, a.shootNamespace, cwnpMR, result); err != nil {
+		return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
+	}
+
 	return nil
 }
