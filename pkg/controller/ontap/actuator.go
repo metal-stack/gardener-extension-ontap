@@ -2,6 +2,7 @@ package ontap
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -49,6 +50,7 @@ const (
 	tridentBackendsMR      string = "trident-backends"
 	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
 	svmSeedSecretNamespace string = "kube-system"
+	cwnpMR                 string = "cluster-wide-network-policy"
 
 	defaultChartPath = "charts/trident"
 )
@@ -385,20 +387,15 @@ func (a *actuator) ensureClusterwideNetworkPolicy(ctx context.Context, svmIpaddr
 		},
 	}
 
-	// TODO decide if we take this approach or apply cwnp as templated yaml files
+	result := make(map[string][]byte)
+	jsonData, err := json.Marshal(cwnp)
+	if err != nil {
+		return fmt.Errorf("failed to marshal CRD: %w", err)
+	}
 
-	if err := managedresources.CreateForShoot(
-		ctx,
-		a.client,
-		"firewall",
-		"ontap-access-clusterwidenetworkpolicy",
-		true,
-		"ClusterwideNetworkPolicy.metal-stack.io/v1",
-		cwnp,
-		true,
-		nil,
-	); err != nil {
-		return fmt.Errorf("failed to create managed resource %s: %w", resourceName, err)
+	result["clusterwideNetworkPolicy"] = jsonData
+	if err := services.DeployResources(ctx, a.log, a.client, a.shootNamespace, cwnpMR, result); err != nil {
+		return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
 	}
 
 	return nil
