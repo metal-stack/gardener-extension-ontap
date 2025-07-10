@@ -172,7 +172,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	// Create clusterwidenetworkpolicy
 	err := a.ensureClusterwideNetworkPolicy(ctx, ontapConfig.SvmIpaddresses)
 	if err != nil {
-		return fmt.Errorf("ensuring clusterwidenetworkpolicy for shoot failed", err)
+		return fmt.Errorf("ensuring clusterwidenetworkpolicy for shoot failed %w", err)
 	}
 	a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
 	var projectTag tag.TagMap = shoot.Annotations
