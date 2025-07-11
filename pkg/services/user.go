@@ -67,6 +67,7 @@ func (m *SvnManager) CreateUserAndSecret(ctx context.Context, opts userAndSecret
 		if errors.Is(err, ErrSeedSecretMissing) {
 			m.log.Info("seed Secret missing for first shoot, creating...")
 			tridentSecret := buildSecret(secretName, defaultSVMUsername, password, opts.projectID, opts.svmSeedSecretNamespace)
+			// make this use of managedRessource aswell, otherwise seed secret can be deleted
 			err := opts.seedClient.Create(ctx, tridentSecret)
 			if err != nil {
 				return fmt.Errorf("creating secret in seed failed: %w", err)

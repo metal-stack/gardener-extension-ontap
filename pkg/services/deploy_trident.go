@@ -90,7 +90,10 @@ func DeployResources(
 	); err != nil {
 		return fmt.Errorf("failed to create managed resource %s: %w", resourceName, err)
 	}
-
+	// this was checked before only for the crd deployment, will have to check if this gives issues when checking for other mr deployments aswell
+	if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, k8sClient, namespace, resourceName); err != nil {
+		return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
+	}
 	log.Info("successfully initiated deployment for managed resource", "name", resourceName)
 	return nil
 }
@@ -107,7 +110,6 @@ func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName, 
 	}
 
 	// Read template files
-	storageClassPath := filepath.Join(backendTemplateDir, storageClassFilename)
 	backendConfigPath := filepath.Join(backendTemplateDir, backendConfigFilename)
 
 	// Read backend config template (if it exists)
@@ -135,8 +137,29 @@ func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName, 
 			"projectId", projectId,
 			"secretName", secretName)
 	}
-	// Log the storage class path
-	log.Info("Storage class file ready for deployment", "path", storageClassPath)
 
+	return nil
+}
+
+func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client, namespace, projectId, secretName, managementLifIp string, tridentRessourceToDeploy map[string]string) error {
+	for resourceName, yamlPath := range tridentRessourceToDeploy {
+		yamlBytes, err := LoadYAMLFiles(yamlPath)
+		if err != nil {
+			return err
+		}
+
+		if resourceName == "trident-backends" {
+			if err := ProcessBackendTemplates(log, yamlPath, projectId, secretName, managementLifIp); err != nil {
+				return fmt.Errorf("failed to process backend templates: %w", err)
+			}
+		}
+
+		log.Info("deploying %s as managedressource", resourceName)
+		err = DeployResources(ctx, log, k8sClient, namespace, resourceName, yamlBytes)
+		if err != nil {
+			return err
+		}
+
+	}
 	return nil
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
-	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/go-openapi/strfmt"
 
 	"github.com/gardener/gardener/pkg/apis/core/install"
@@ -180,19 +179,24 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return err
 	}
 
-	// FIXME let the trident deployer do the following work
-
 	// FIXME check username/passwort created per k8s cluster
 	secretName := fmt.Sprintf(services.SecretNameFormat, projectId)
 	a.log.Info("Using credentials from secret in shoot cluster", "secretName", secretName, "namespace", "kube-system")
 
 	// Define base paths correctly based on the actual structure
 	var (
-		chartPath       = defaultChartPath                             // "charts/trident"
-		resourcesPath   = filepath.Join(chartPath, "resources")        // "charts/trident/resources"
-		tridentInitPath = filepath.Join(resourcesPath, "trident-init") // "charts/trident/resources/trident-init"
-		crdPath         = filepath.Join(resourcesPath, "crds")         // "charts/trident/resources/crds"
-		backendPath     = filepath.Join(resourcesPath, "backends")     // "charts/trident/resources/backends"
+		chartPath       = defaultChartPath
+		resourcesPath   = filepath.Join(chartPath, "resources")
+		tridentInitPath = filepath.Join(resourcesPath, "trident-init")
+		crdPath         = filepath.Join(resourcesPath, "crds")
+		backendPath     = filepath.Join(resourcesPath, "backends")
+
+		// Map paths to names
+		tridentRessourceToDeploy = map[string]string{
+			tridentInitMR:     tridentInitPath,
+			tridentCRDsName:   crdPath,
+			tridentBackendsMR: backendPath,
+		}
 	)
 
 	// get existing secret for svm in kube-system namespace
@@ -221,61 +225,10 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return fmt.Errorf("failed to deploy trident secrets as MR: %w", err)
 	}
 
-	// 1. Load and Deploy CRDs
-	a.log.Info("Loading Trident CRDs", "path", crdPath)
-	crdYamls, err := services.LoadYAMLFiles(crdPath) // Load only from the correct crdPath
+	err := services.DeployTrident(ctx, a.log, a.client, a.shootNamespace, projectId, secretName, ontapConfig.SvmIpaddresses.ManagementLif, tridentRessourceToDeploy)
 	if err != nil {
-		return fmt.Errorf("failed to load Trident CRDs from %s: %w", crdPath, err)
+		return err
 	}
-	if len(crdYamls) > 0 {
-		a.log.Info("Deploying Trident CRDs managed resource", "namespace", a.shootNamespace, "name", tridentCRDsName)
-		if err := services.DeployResources(ctx, a.log, a.client, a.shootNamespace, tridentCRDsName, crdYamls); err != nil {
-			return fmt.Errorf("failed to deploy Trident CRDs: %w", err)
-		}
-		// Wait for CRD Managed Resource to be Ready
-		a.log.Info("Waiting for Trident CRDs managed resource to be ready", "name", tridentCRDsName)
-		if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, a.client, a.shootNamespace, tridentCRDsName); err != nil {
-			return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
-		}
-		a.log.Info("Trident CRDs managed resource is ready", "name", tridentCRDsName)
-	}
-
-	// 2. Load and Deploy Trident Init Resources
-	a.log.Info("Loading Trident Init resources", "path", tridentInitPath)
-	// Load only from the correct tridentInitPath, no exclusions needed as CRDs/Backends are separate dirs
-	tridentInitYamls, err := services.LoadYAMLFiles(tridentInitPath)
-	if err != nil {
-		return fmt.Errorf("failed to load Trident Init resources from %s: %w", tridentInitPath, err)
-	}
-	if len(tridentInitYamls) > 0 {
-		a.log.Info("Deploying Trident Init managed resource", "namespace", ex.Namespace, "name", tridentInitMR)
-		err = services.DeployResources(ctx, a.log, a.client, ex.Namespace, tridentInitMR, tridentInitYamls)
-		if err != nil {
-			return fmt.Errorf("failed to create managed resources for Trident Init: %w", err)
-		}
-		a.log.Info("Trident Init managed resource deployment initiated", "name", tridentInitMR)
-	}
-	// 3. Process backend templates (only needs ProjectID now)
-	a.log.Info("Processing backend templates", "path", backendPath)
-	if err := services.ProcessBackendTemplates(a.log, chartPath, projectId, secretName, ontapConfig.SvmIpaddresses.ManagementLif); err != nil {
-		return fmt.Errorf("failed to process backend templates: %w", err)
-	}
-	// 4. Load and Deploy Backend Resources
-	a.log.Info("Loading Trident Backend resources", "path", backendPath)
-	backendYamls, err := services.LoadYAMLFiles(backendPath) // Load only from the correct backendPath
-	if err != nil {
-		return fmt.Errorf("failed to load Trident Backend resources from %s: %w", backendPath, err)
-	}
-	if len(backendYamls) > 0 {
-		a.log.Info("Deploying Trident Backends managed resource", "namespace", ex.Namespace, "name", tridentBackendsMR)
-		err = services.DeployResources(ctx, a.log, a.client, ex.Namespace, tridentBackendsMR, backendYamls)
-		if err != nil {
-			return fmt.Errorf("failed to create managed resources for Trident Backends: %w", err)
-		}
-		a.log.Info("Trident Backends managed resource deployment initiated", "name", tridentBackendsMR)
-		// Consider waiting for Backend MR if needed.
-	}
-
 	a.log.Info("ONTAP extension reconciliation completed successfully")
 	return nil
 }
