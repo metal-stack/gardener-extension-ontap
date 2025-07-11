@@ -100,6 +100,7 @@ func DeployResources(
 
 // ProcessBackendTemplates reads backend templates, replaces placeholders, and writes the results back.
 // It now only replaces PROJECT_ID and SECRET_NAME as LIFs are handled by service FQDNs directly in the template.
+// FIXME: This function is really ugly, please fix
 func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName, managementIp string) error {
 	backendTemplateDir := filepath.Join(chartPath, "resources", "backends")
 	log.Info("Processing backend templates", "directory", backendTemplateDir)
@@ -143,18 +144,19 @@ func ProcessBackendTemplates(log logr.Logger, chartPath, projectId, secretName, 
 
 func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client, namespace, projectId, secretName, managementLifIp string, tridentRessourceToDeploy map[string]string) error {
 	for resourceName, yamlPath := range tridentRessourceToDeploy {
+		log.Info("loading %s from chart path", resourceName)
 		yamlBytes, err := LoadYAMLFiles(yamlPath)
 		if err != nil {
 			return err
 		}
 
 		if resourceName == "trident-backends" {
+			log.Info("templating trident backend config")
 			if err := ProcessBackendTemplates(log, yamlPath, projectId, secretName, managementLifIp); err != nil {
 				return fmt.Errorf("failed to process backend templates: %w", err)
 			}
 		}
 
-		log.Info("deploying %s as managedressource", resourceName)
 		err = DeployResources(ctx, log, k8sClient, namespace, resourceName, yamlBytes)
 		if err != nil {
 			return err

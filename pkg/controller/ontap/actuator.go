@@ -39,7 +39,6 @@ const (
 	tridentCRDsName        string = "trident-crds"
 	tridentInitMR          string = "trident-init"
 	tridentBackendsMR      string = "trident-backends"
-	tridentLifServicesMR   string = "trident-lif-services" // New MR name for LIF services/endpoints
 	svmSeedSecretNamespace string = "kube-system"
 
 	defaultChartPath = "charts/trident"
