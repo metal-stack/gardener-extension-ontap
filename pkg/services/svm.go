@@ -115,12 +115,12 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	m.log.Info("SVM is ready", "projectId", opts.ProjectID, "uuid", svmUUID)
 
 	// 5. Create data LIFs
-	for _, datalifIp := range opts.SvmIpaddresses.DataLifs {
+	for i, datalifIp := range opts.SvmIpaddresses.DataLifs {
 		dataLifOpts := networkInterfaceOptions{
 			svmUUID:   svmUUID,
 			svmName:   opts.ProjectID,
 			ipAddress: datalifIp,
-			lifName:   dataLifTag,
+			lifName:   fmt.Sprintf("%s+%d", dataLifTag, i),
 			// TODO:needs to be adjusted so ips are created distributed on both nodes, PR is open for this already
 			nodeUUID:  nodeUUID,
 			isDataLif: true,

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gardener/gardener/pkg/client/kubernetes"
-	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/metal-stack/metal-lib/pkg/pointer"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,6 +65,7 @@ func (m *SvnManager) CreateUserAndSecret(ctx context.Context, opts userAndSecret
 		if errors.Is(err, ErrSeedSecretMissing) {
 			m.log.Info("seed Secret missing for first shoot, creating...")
 			tridentSecret := buildSecret(secretName, defaultSVMUsername, password, opts.projectID, opts.svmSeedSecretNamespace)
+			// make this use of managedRessource aswell, otherwise seed secret can be deleted
 			err := opts.seedClient.Create(ctx, tridentSecret)
 			if err != nil {
 				return fmt.Errorf("creating secret in seed failed: %w", err)
@@ -159,37 +158,6 @@ func (m *SvnManager) checkIfAccountExistsForSvm(ctx context.Context, svmName str
 // FIXME what is this for
 func generateSecurePassword() string {
 	return "fsqe2020"
-}
-
-// deployTridentSecrets creates or updates the secret for Trident
-func (m *SvnManager) DeployTridentSecretsInShootAsMR(ctx context.Context, opts DeployTridentSecretsOptions) error {
-
-	// Create the secret in the shoot namespace instead of kube-system
-	tridentSecret := buildSecret(opts.SecretName, opts.UserName, string(opts.Password), opts.ProjectID, "kube-system")
-	clientObjs := []client.Object{tridentSecret}
-	shootResources, err := managedresources.
-		NewRegistry(kubernetes.ShootScheme, kubernetes.ShootCodec, kubernetes.ShootSerializer).
-		AddAllAndSerialize(clientObjs...)
-	if err != nil {
-		return fmt.Errorf("failed to serialize trident resources: %w", err)
-	}
-
-	err = managedresources.CreateForShoot(
-		ctx,
-		m.seedClient,
-		opts.ShootNamespace,
-		"trident-credentials",
-		"kube-system",
-		false,
-		shootResources,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create ManagedResource for credentials: %w", err)
-	}
-	m.log.Info("Trident credentials secret created and confirmed healthy",
-		"projectId", opts.ProjectID,
-		"shootNamespace", opts.ShootNamespace)
-	return nil
 }
 
 // buildSecret creates a secret with the SVM credentials in the specified namespace
