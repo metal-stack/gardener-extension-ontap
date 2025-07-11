@@ -9,7 +9,6 @@ import (
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
-	"github.com/go-openapi/strfmt"
 
 	"github.com/gardener/gardener/pkg/apis/core/install"
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -39,6 +38,7 @@ const (
 	tridentCRDsName        string = "trident-crds"
 	tridentInitMR          string = "trident-init"
 	tridentBackendsMR      string = "trident-backends"
+	tridentSvmSecret       string = "trident-svm-secret"
 	svmSeedSecretNamespace string = "kube-system"
 
 	defaultChartPath = "charts/trident"
@@ -179,8 +179,23 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	}
 
 	// FIXME check username/passwort created per k8s cluster
-	secretName := fmt.Sprintf(services.SecretNameFormat, projectId)
-	a.log.Info("Using credentials from secret in shoot cluster", "secretName", secretName, "namespace", "kube-system")
+	seedsecretName := fmt.Sprintf(services.SecretNameFormat, projectId)
+	a.log.Info("Using credentials from secret in shoot cluster", "secretName", seedsecretName, "namespace", "kube-system")
+
+	// get existing secret for svm in kube-system namespace
+	existingSecret := &corev1.Secret{}
+	if err := a.client.Get(ctx, client.ObjectKey{Namespace: svmSeedSecretNamespace, Name: seedsecretName}, existingSecret); err != nil {
+		return fmt.Errorf("failed to get secret: %w", err)
+	}
+
+	username, ok := existingSecret.Data["username"]
+	if !ok {
+		return fmt.Errorf("username not found in seed secret, secretname:%s", seedsecretName)
+	}
+	password, ok := existingSecret.Data["password"]
+	if !ok {
+		return fmt.Errorf("password not found in seed secret secretname:%s", seedsecretName)
+	}
 
 	// Define base paths correctly based on the actual structure
 	var (
@@ -189,42 +204,25 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		tridentInitPath = filepath.Join(resourcesPath, "trident-init")
 		crdPath         = filepath.Join(resourcesPath, "crds")
 		backendPath     = filepath.Join(resourcesPath, "backends")
-
+		svmSecretsPath  = filepath.Join(resourcesPath, "secrets")
 		// Map paths to names
 		tridentRessourceToDeploy = map[string]string{
 			tridentInitMR:     tridentInitPath,
 			tridentCRDsName:   crdPath,
 			tridentBackendsMR: backendPath,
+			tridentSvmSecret:  svmSecretsPath,
 		}
 	)
 
-	// get existing secret for svm in kube-system namespace
-	existingSecret := &corev1.Secret{}
-	if err := a.client.Get(ctx, client.ObjectKey{Namespace: svmSeedSecretNamespace, Name: secretName}, existingSecret); err != nil {
-		return fmt.Errorf("failed to get secret: %w", err)
+	tridentValues := services.DeployTridentValues{
+		Namespace:       a.shootNamespace,
+		ProjectId:       projectId,
+		SeedsecretName:  &seedsecretName,
+		ManagementLifIp: ontapConfig.SvmIpaddresses.ManagementLif,
+		Username:        string(username),
+		Password:        string(password),
 	}
-
-	username, ok := existingSecret.Data["username"]
-	if !ok {
-		return fmt.Errorf("username not found in secret, secretname:%s", secretName)
-	}
-	password, ok := existingSecret.Data["password"]
-	if !ok {
-		return fmt.Errorf("password not found in secret secretname:%s", secretName)
-	}
-
-	deployOpts := services.DeployTridentSecretsOptions{
-		ProjectID:      projectId,
-		ShootNamespace: a.shootNamespace,
-		SecretName:     secretName,
-		UserName:       string(username),
-		Password:       strfmt.Password(password),
-	}
-	if err := a.svnManager.DeployTridentSecretsInShootAsMR(ctx, deployOpts); err != nil {
-		return fmt.Errorf("failed to deploy trident secrets as MR: %w", err)
-	}
-
-	err := services.DeployTrident(ctx, a.log, a.client, a.shootNamespace, projectId, secretName, ontapConfig.SvmIpaddresses.ManagementLif, tridentRessourceToDeploy)
+	err := services.DeployTrident(ctx, a.log, a.client, tridentValues, tridentRessourceToDeploy)
 	if err != nil {
 		return err
 	}
