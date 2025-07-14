@@ -15,7 +15,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
-	"github.com/metal-stack/gardener-extension-ontap/pkg/services"
+	"github.com/metal-stack/gardener-extension-ontap/pkg/trident"
 	"github.com/metal-stack/metal-lib/pkg/tag"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -48,7 +48,7 @@ type actuator struct {
 	log            logr.Logger
 	ontap          *ontapv1.Ontap
 	client         client.Client
-	svnManager     *services.SvnManager
+	svnManager     *trident.SvnManager
 	shootNamespace string
 	decoder        runtime.Decoder
 	config         config.ControllerConfiguration
@@ -66,7 +66,7 @@ func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, conf
 
 	client := mgr.GetClient()
 
-	svnManager := services.NewSvnManager(log, ontap, client)
+	svnManager := trident.NewSvnManager(log, ontap, client)
 	return &actuator{
 		log:        log,
 		ontap:      ontap,
@@ -179,7 +179,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	}
 
 	// FIXME check username/passwort created per k8s cluster
-	seedsecretName := fmt.Sprintf(services.SecretNameFormat, projectId)
+	seedsecretName := fmt.Sprintf(trident.SecretNameFormat, projectId)
 	a.log.Info("Using credentials from secret in shoot cluster", "secretName", seedsecretName, "namespace", "kube-system")
 
 	// get existing secret for svm in kube-system namespace
@@ -214,7 +214,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		}
 	)
 
-	tridentValues := services.DeployTridentValues{
+	tridentValues := trident.DeployTridentValues{
 		Namespace:       a.shootNamespace,
 		ProjectId:       projectId,
 		SeedsecretName:  &seedsecretName,
@@ -222,7 +222,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		Username:        string(username),
 		Password:        string(password),
 	}
-	err := services.DeployTrident(ctx, a.log, a.client, tridentValues, tridentRessourceToDeploy)
+	err := trident.DeployTrident(ctx, a.log, a.client, tridentValues, tridentRessourceToDeploy)
 	if err != nil {
 		return err
 	}
@@ -273,10 +273,10 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
 	_, err := a.svnManager.GetSVMByName(projectId)
 	if err != nil {
-		if errors.Is(err, services.ErrNotFound) {
+		if errors.Is(err, trident.ErrNotFound) {
 			a.log.Info("SVM not found, proceeding with creation", "projectId", projectId)
 
-			svmOpts := services.CreateSVMOptions{
+			svmOpts := trident.CreateSVMOptions{
 				ProjectID:              projectId,
 				SvmIpaddresses:         SvmIpaddresses,
 				SvmSeedSecretNamespace: svmSeedSecretNamespace,
