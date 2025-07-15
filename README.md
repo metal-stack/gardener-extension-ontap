@@ -236,8 +236,11 @@ metadata:
   name: luks
 provisioner: csi.trident.netapp.io
 parameters:
+  selector: "luks=true"
   csi.storage.k8s.io/node-stage-secret-name: luks-pvc1
   csi.storage.k8s.io/node-stage-secret-namespace: kube-system
+  backendType: "ontap-san"
+  provisioningType: "thick"
 ```
 
 ## 3. PVC Using the Encrypted StorageClass
