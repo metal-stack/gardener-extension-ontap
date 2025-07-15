@@ -20,7 +20,9 @@ spec:
       kind: TridentConfig
       svmIpaddresses:
         managementLif: 192.168.10.29 
-        dataLif: 192.168.10.30
+        dataLif: 
+        - 192.168.10.30
+        - 192.168.10.31
   networking:
     type: calico
     nodes: 10.10.0.0/16
