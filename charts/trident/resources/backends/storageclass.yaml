@@ -6,3 +6,4 @@ provisioner: csi.trident.netapp.io
 parameters:
   backendType: "ontap-san"
   provisioningType: "thick"
+  selector: "luks=false"

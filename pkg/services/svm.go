@@ -115,13 +115,12 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	m.log.Info("SVM is ready", "projectId", opts.ProjectID, "uuid", svmUUID)
 
 	// 5. Create data LIFs
-	for _, datalifIp := range opts.SvmIpaddresses.DataLifs {
+	for i, datalifIp := range opts.SvmIpaddresses.DataLifs {
 		dataLifOpts := networkInterfaceOptions{
 			svmUUID:   svmUUID,
 			svmName:   opts.ProjectID,
 			ipAddress: datalifIp,
-			lifName:   dataLifTag,
-			// TODO:needs to be adjusted so ips are created distributed on both nodes, PR is open for this already
+			lifName:   fmt.Sprintf("%s+%d", dataLifTag, i), // TODO:needs to be adjusted so ips are created distributed on both nodes, PR is open for this already
 			nodeUUID:  nodeUUID,
 			isDataLif: true,
 		}
@@ -382,9 +381,14 @@ func (m *SvnManager) waitForSvmReady(svmName string) (string, error) {
 			return fmt.Errorf("svm exist but not in running state yet:%s", currentState)
 		}
 
-		m.log.Info("SVM is ready", "svmName", svmName, "uuid", svmUUID, "state", currentState)
-		uuid = svmUUID
-		return nil
+		if svmInfo.Payload.Nvme != nil && svmInfo.Payload.Nvme.Enabled != nil && *svmInfo.Payload.Nvme.Enabled {
+			m.log.Info("SVM is ready and NVMe is enabled", "svmName", svmName, "uuid", svmUUID, "state", currentState)
+			uuid = svmUUID
+			return nil
+		}
+
+		m.log.Info("SVM is running but NVMe is not yet enabled, retrying...", "svmName", svmName)
+		return fmt.Errorf("SVM is running but NVMe is not yet enabled")
 	},
 		retry.Attempts(10),
 		retry.MaxDelay(5*time.Second),
