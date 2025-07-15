@@ -16,3 +16,9 @@ spec:
   storage:
   - labels:
       luks: "true"
+    defaults:
+      luksEncryption: "true"
+  - labels:
+      luks: "false"
+    defaults:
+      luksEncryption: "false"
