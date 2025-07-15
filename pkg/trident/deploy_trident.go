@@ -29,6 +29,12 @@ type DeployTridentValues struct {
 	Password        string
 }
 
+type TridentResource struct {
+	Name           string
+	Path           string
+	WaitForHealthy bool
+}
+
 // LoadYAMLFiles walks the given directory path and reads all YAML files,
 // returning them in a map where the key is the relative path with '/' replaced by '.'.
 func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
@@ -79,6 +85,7 @@ func DeployResources(
 	namespace string,
 	resourceName string,
 	resourceYamls map[string][]byte, // Takes YAMLs directly
+	waitForHealthy bool,
 ) error {
 	// Check if there are any resources to deploy
 	if len(resourceYamls) == 0 {
@@ -100,43 +107,45 @@ func DeployResources(
 	); err != nil {
 		return fmt.Errorf("failed to create managed resource %s: %w", resourceName, err)
 	}
-	// this was checked before only for the crd deployment, will have to check if this gives issues when checking for other mr deployments aswell
-	if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, k8sClient, namespace, resourceName); err != nil {
-		return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
+	if waitForHealthy {
+		if err := managedresources.WaitUntilHealthyAndNotProgressing(ctx, k8sClient, namespace, resourceName); err != nil {
+			return fmt.Errorf("failed while waiting for Trident CRDs managed resource: %w", err)
+		}
 	}
+
 	log.Info("successfully initiated deployment for managed resource", "name", resourceName)
 	return nil
 }
 
 // DeployTrident deploys Trident using the provided values and resources.
-func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client, tridentValues DeployTridentValues, tridentRessourceToDeploy map[string]string) error {
-	for resourceName, yamlPath := range tridentRessourceToDeploy {
-		log.Info("loading YAML files for resource", resourceName)
-		yamlBytes, err := LoadYAMLFiles(yamlPath)
+func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client, tridentValues DeployTridentValues, tridentRessourceToDeploy []TridentResource) error {
+	for _, resource := range tridentRessourceToDeploy {
+		log.Info("loading YAML files for resource", "resource", resource.Name)
+		yamlBytes, err := LoadYAMLFiles(resource.Path)
 		if err != nil {
 			return err
 		}
 
 		// FIXXME Will be changed for sure
-		if resourceName == "trident-backends" {
+		if resource.Name == "trident-backends" {
 			key := backendConfigFilename
 			config, ok := yamlBytes[key]
 			if !ok {
-				return fmt.Errorf("backend config file '%s' not found in loaded YAMLs for %s", key, resourceName)
+				return fmt.Errorf("backend config file '%s' not found in loaded YAMLs for %s", key, resource.Name)
 			}
 			configStr := string(config)
 			configStr = strings.ReplaceAll(configStr, "${PROJECT_ID}", tridentValues.ProjectId)
 			configStr = strings.ReplaceAll(configStr, "${SECRET_NAME}", *tridentValues.SeedsecretName)
 			configStr = strings.ReplaceAll(configStr, "${MANAGEMENT_LIF_IP}", tridentValues.ManagementLifIp)
 			yamlBytes[key] = []byte(configStr)
-			log.Info("Templated backend config", "resource", resourceName)
+			log.Info("Templated backend config", "resource", resource.Name)
 		}
 
-		if resourceName == "trident-svm-secret" {
+		if resource.Name == "trident-svm-secret" {
 			key := svmShootSecretFilename
 			secret, ok := yamlBytes[key]
 			if !ok {
-				return fmt.Errorf("secret template file '%s' not found in loaded YAMLs for %s", key, resourceName)
+				return fmt.Errorf("secret template file '%s' not found in loaded YAMLs for %s", key, resource.Name)
 			}
 			secretStr := string(secret)
 			secretStr = strings.ReplaceAll(secretStr, "${SECRET_NAME}", *tridentValues.SeedsecretName)
@@ -145,10 +154,10 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			secretStr = strings.ReplaceAll(secretStr, "${USER_NAME}", tridentValues.Username)
 			secretStr = strings.ReplaceAll(secretStr, "${PASSWORD}", tridentValues.Password)
 			yamlBytes[key] = []byte(secretStr)
-			log.Info("Templated SVM secret", "resource", resourceName)
+			log.Info("Templated SVM secret", "resource", resource.Name)
 		}
 
-		err = DeployResources(ctx, log, k8sClient, tridentValues.Namespace, resourceName, yamlBytes)
+		err = DeployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
 		if err != nil {
 			return err
 		}

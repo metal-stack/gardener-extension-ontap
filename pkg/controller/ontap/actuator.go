@@ -44,6 +44,22 @@ const (
 	defaultChartPath = "charts/trident"
 )
 
+var (
+	chartPath       = defaultChartPath
+	resourcesPath   = filepath.Join(chartPath, "resources")
+	tridentInitPath = filepath.Join(resourcesPath, "trident-init")
+	crdPath         = filepath.Join(resourcesPath, "crds")
+	backendPath     = filepath.Join(resourcesPath, "backends")
+	svmSecretsPath  = filepath.Join(resourcesPath, "secrets")
+
+	tridentRessourceToDeploy = []trident.TridentResource{
+		{Name: tridentInitMR, Path: tridentInitPath, WaitForHealthy: false},
+		{Name: tridentCRDsName, Path: crdPath, WaitForHealthy: true},
+		{Name: tridentBackendsMR, Path: backendPath, WaitForHealthy: false},
+		{Name: tridentSvmSecret, Path: svmSecretsPath, WaitForHealthy: false},
+	}
+)
+
 type actuator struct {
 	log            logr.Logger
 	ontap          *ontapv1.Ontap
@@ -196,23 +212,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	if !ok {
 		return fmt.Errorf("password not found in seed secret secretname:%s", seedsecretName)
 	}
-
-	// Define base paths correctly based on the actual structure
-	var (
-		chartPath       = defaultChartPath
-		resourcesPath   = filepath.Join(chartPath, "resources")
-		tridentInitPath = filepath.Join(resourcesPath, "trident-init")
-		crdPath         = filepath.Join(resourcesPath, "crds")
-		backendPath     = filepath.Join(resourcesPath, "backends")
-		svmSecretsPath  = filepath.Join(resourcesPath, "secrets")
-		// Map paths to names
-		tridentRessourceToDeploy = map[string]string{
-			tridentInitMR:     tridentInitPath,
-			tridentCRDsName:   crdPath,
-			tridentBackendsMR: backendPath,
-			tridentSvmSecret:  svmSecretsPath,
-		}
-	)
 
 	tridentValues := trident.DeployTridentValues{
 		Namespace:       a.shootNamespace,
