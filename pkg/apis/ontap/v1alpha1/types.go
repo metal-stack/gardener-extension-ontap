@@ -1,7 +1,8 @@
 package v1alpha1
 
 import (
-	"github.com/go-logr/logr"
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -29,15 +30,16 @@ type SvmIpaddresses struct {
 	ManagementLif string `json:"managementLif,omitempty"`
 }
 
-func (config *TridentConfig) IsValid(log logr.Logger) bool {
-	// if slices.Contains(config.Protocols, "nvme") {
-	// 	log.Error(errors.New("protocol nvme is required"), "err", "protocols", config.Protocols)
-	// 	return false
-	// }
-
-	// FIXME more validations
-
-	return true
+func (c *TridentConfig) Validate() error {
+	if c.SvmIpaddresses.ManagementLif == "" {
+		return fmt.Errorf("management LIF IP address must be provided")
+	}
+	for i, ip := range c.SvmIpaddresses.DataLifs {
+		if ip == "" {
+			return fmt.Errorf("data LIF at index %d cannot be empty", i)
+		}
+	}
+	return nil
 }
 
 func (config *TridentConfig) ConfigureDefaults(svmName *string, svmSecretRef *string) error {

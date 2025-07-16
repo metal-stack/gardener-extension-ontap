@@ -165,6 +165,10 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return fmt.Errorf("failed to decode provider config: %w", err)
 	}
 
+	if err := ontapConfig.Validate(); err != nil {
+		return fmt.Errorf("invalid trident config: %w", err)
+	}
+
 	cluster := &extensionsv1alpha1.Cluster{}
 	if err := a.client.Get(ctx, client.ObjectKey{Name: ex.Namespace}, cluster); err != nil {
 		return fmt.Errorf("failed to get cluster object: %w", err)
