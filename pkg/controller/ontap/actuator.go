@@ -82,7 +82,7 @@ func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, conf
 
 	client := mgr.GetClient()
 
-	svnManager := trident.NewSvnManager(log, ontap, client)
+	svnManager := trident.NewSvmManager(log, ontap, client)
 	return &actuator{
 		log:        log,
 		ontap:      ontap,
@@ -137,7 +137,7 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		return nil, fmt.Errorf("failed to create ONTAP API client: %w", err)
 	}
 
-	params := s_vm.NewSvmCollectionGetParams()
+	params := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
 	result, err := ontap.SVM.SvmCollectionGet(params, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
@@ -273,7 +273,7 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 
 // ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
 func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
-	_, err := a.svnManager.GetSVMByName(projectId)
+	_, err := a.svnManager.GetSVMByName(ctx, projectId)
 	if err != nil {
 		if errors.Is(err, trident.ErrNotFound) {
 			a.log.Info("SVM not found, proceeding with creation", "projectId", projectId)

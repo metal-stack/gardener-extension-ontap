@@ -107,7 +107,7 @@ func (m *SvnManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOp
 		vsadminRole = "vsadmin"
 	)
 
-	createAccountParams := security.NewAccountCreateParams()
+	createAccountParams := security.NewAccountCreateParamsWithContext(ctx)
 	createAccountParams.SetInfo(&models.Account{
 		Name:     pointer.Pointer(opts.username),
 		Password: &pwdVal,

@@ -61,7 +61,7 @@ type SvnManager struct {
 	seedClient  client.Client
 }
 
-func NewSvnManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient client.Client) *SvnManager {
+func NewSvmManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient client.Client) *SvnManager {
 	return &SvnManager{
 		log:         log,
 		ontapClient: ontapClient,
@@ -74,12 +74,12 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLifs", opts.SvmIpaddresses.DataLifs)
 
 	// 1. Get a node for network interface placement and aggregate selection
-	nodeUUID, err := m.getFirstNodeInCluster()
+	nodeUUID, err := m.getFirstNodeInCluster(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get a node for SVM creation: %w", err)
 	}
 
-	// 2. Find a suitable aggregate on the selected node
+	// FIXME Throw this out
 	chosenAggregateUUID, err := m.findSuitableAggregateForNode(nodeUUID)
 	if err != nil {
 		return fmt.Errorf("failed to find a suitable aggregate for SVM %s: %w", opts.ProjectID, err)
@@ -90,6 +90,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	params := &s_vm.SvmCreateParams{
 		Info: &models.Svm{
 			Name: &opts.ProjectID,
+			//Check if svm creation works without this
 			SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
 				{UUID: chosenAggregateUUID},
 			},
@@ -98,6 +99,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 				Allowed: pointer.Pointer(true),
 			},
 		},
+		Context: ctx,
 	}
 
 	m.log.Info("Sending SVM create request", "params", fmt.Sprintf("%+v", params))
@@ -107,7 +109,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 
 	m.log.Info("SVM created successfully", "name", opts.ProjectID, "aggregateUUID", *chosenAggregateUUID)
 	// 4. Wait for SVM to be ready and get its UUID
-	svmUUID, err := m.waitForSvmReady(opts.ProjectID)
+	svmUUID, err := m.waitForSvmReady(ctx, opts.ProjectID)
 	if err != nil {
 		return fmt.Errorf("SVM '%s' was not ready: %w", opts.ProjectID, err)
 	}
@@ -124,7 +126,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 			nodeUUID:  nodeUUID,
 			isDataLif: true,
 		}
-		if err := m.createNetworkInterfaceForSvm(dataLifOpts); err != nil {
+		if err := m.createNetworkInterfaceForSvm(ctx, dataLifOpts); err != nil {
 			return fmt.Errorf("failed to create data LIF for SVM %s: %w", opts.ProjectID, err)
 		}
 	}
@@ -138,7 +140,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		nodeUUID:  nodeUUID,
 		isDataLif: false,
 	}
-	if err := m.createNetworkInterfaceForSvm(mgmtLifOpts); err != nil {
+	if err := m.createNetworkInterfaceForSvm(ctx, mgmtLifOpts); err != nil {
 		return fmt.Errorf("failed to create management LIF for SVM %s: %w", opts.ProjectID, err)
 	}
 
@@ -226,10 +228,10 @@ func (m *SvnManager) findSuitableAggregateForNode(nodeUUID string) (*string, err
 
 // getFirstNodeInCluster fetches the first node name found in the ONTAP cluster
 // Needs to be changed, waiting for Netapp answer
-func (m *SvnManager) getFirstNodeInCluster() (string, error) {
+func (m *SvnManager) getFirstNodeInCluster(ctx context.Context) (string, error) {
 	m.log.Info("Fetching first available node in cluster...")
 
-	params := cluster.NewNodesGetParams()
+	params := cluster.NewNodesGetParamsWithContext(ctx)
 	params.SetFields([]string{"uuid", "name"})
 
 	result, err := m.ontapClient.Cluster.NodesGet(params, nil)
@@ -253,11 +255,11 @@ func (m *SvnManager) getFirstNodeInCluster() (string, error) {
 }
 
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
-func (m *SvnManager) createNetworkInterfaceForSvm(opts networkInterfaceOptions) error {
+func (m *SvnManager) createNetworkInterfaceForSvm(ctx context.Context, opts networkInterfaceOptions) error {
 
 	m.log.Info("Creating network interface", "svm", opts.svmName, "lifName", opts.lifName, "ip", opts.ipAddress, "node", opts.nodeUUID)
 
-	params := networking.NewNetworkIPInterfacesCreateParams()
+	params := networking.NewNetworkIPInterfacesCreateParamsWithContext(ctx)
 	// Create the basic interface structure
 	interfaceInfo := &models.IPInterface{
 		Name:    pointer.Pointer(opts.lifName),
@@ -267,7 +269,7 @@ func (m *SvnManager) createNetworkInterfaceForSvm(opts networkInterfaceOptions) 
 		},
 	}
 
-	paramsBgp := networking.NewNetworkIPBgpPeerGroupsGetParams()
+	paramsBgp := networking.NewNetworkIPBgpPeerGroupsGetParamsWithContext(ctx)
 	bgpres, err := m.ontapClient.Networking.NetworkIPBgpPeerGroupsGet(paramsBgp, nil)
 	if err != nil {
 		return err
@@ -318,13 +320,13 @@ func (m *SvnManager) createNetworkInterfaceForSvm(opts networkInterfaceOptions) 
 }
 
 // Returns a svm by inputting the svmName, i.e. projectId
-func (m *SvnManager) GetSVMByName(svmName string) (string, error) {
+func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (string, error) {
 
 	if m.ontapClient == nil || m.ontapClient.SVM == nil {
 		return "", fmt.Errorf("API client or SVM service is not initialized")
 	}
 
-	params := s_vm.NewSvmCollectionGetParams()
+	params := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
 	svmGetOK, err := m.ontapClient.SVM.SvmCollectionGet(params, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch SVMs: %w", err)
@@ -352,12 +354,12 @@ func (m *SvnManager) GetSVMByName(svmName string) (string, error) {
 }
 
 // waitForSvmReady polls until the SVM exists and is in a "running" state.
-func (m *SvnManager) waitForSvmReady(svmName string) (string, error) {
+func (m *SvnManager) waitForSvmReady(ctx context.Context, svmName string) (string, error) {
 	m.log.Info("waiting for SVM to be ready", "svmName", svmName)
 
 	var uuid string
 	err := retry.Do(func() error {
-		svmUUID, err := m.GetSVMByName(svmName)
+		svmUUID, err := m.GetSVMByName(ctx, svmName)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				m.log.Info("SVM not found by name yet, retrying...", "svmName", svmName)
@@ -367,7 +369,7 @@ func (m *SvnManager) waitForSvmReady(svmName string) (string, error) {
 			return err
 		}
 
-		getParams := s_vm.NewSvmGetParams()
+		getParams := s_vm.NewSvmGetParamsWithContext(ctx)
 		getParams.SetUUID(svmUUID)
 
 		svmInfo, err := m.ontapClient.SVM.SvmGet(getParams, nil)
