@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
-	"github.com/metal-stack/ontap-go/api/client/s_vm"
+	"github.com/metal-stack/ontap-go/api/client/cluster"
 	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
 	corev1 "k8s.io/api/core/v1"
@@ -75,137 +75,95 @@ func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, conf
 	scheme := mgr.GetScheme()
 	install.Install(scheme)
 
-	ontap, err := createAdminClient(ctx, mgr, config)
+	ontapClient, err := createAdminClient(ctx, mgr, config)
 	if err != nil {
 		return nil, err
 	}
 
-	client := mgr.GetClient()
+	if ontapClient != nil {
+		client := mgr.GetClient()
 
-	// TODO creat logic to switch between clients
-	svnManager := trident.NewSvmManager(log, ontap.ClusterA, client)
-	return &actuator{
-		log:        log,
-		ontap:      ontap.ClusterA,
-		client:     client,
-		svnManager: svnManager,
-		decoder:    serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-		config:     config,
-	}, nil
+		svnManager := trident.NewSvmManager(log, ontapClient, client)
+		return &actuator{
+			log:        log,
+			ontap:      ontapClient,
+			client:     client,
+			svnManager: svnManager,
+			decoder:    serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
+			config:     config,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("failed to initalize ontap admin client %w", err)
+
 }
 
-func createAdminClient(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (*ontapclient.MetroClusterClient, error) {
+func createAdminClient(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
 	client := mgr.GetAPIReader()
 	if client == nil {
 		return nil, fmt.Errorf("kubernetes client is not initialized")
 	}
 
-	if config.AdminAuthSecretRef_ClusterA == "" || config.AuthSecretNamespace_ClusterA == "" {
-		return nil, fmt.Errorf("missing fields in config: AdminAuthSecretRef_ClusterA=%s, AuthSecretNamespace_ClusterA=%s",
-			config.AdminAuthSecretRef_ClusterA, config.AuthSecretNamespace_ClusterA)
-	}
-
-	if config.AdminAuthSecretRef_ClusterB == "" || config.AuthSecretNamespace_ClusterB == "" {
-		return nil, fmt.Errorf("missing fields in config: config.AdminAuthSecretRef_ClusterB=%s, AuthSecretNamespace_ClusterB=%s",
-			config.AdminAuthSecretRef_ClusterB, config.AuthSecretNamespace_ClusterB)
-	}
-
-	var secret_clusterA corev1.Secret
-	err := client.Get(ctx, types.NamespacedName{Name: config.AdminAuthSecretRef_ClusterA, Namespace: config.AuthSecretNamespace_ClusterA}, &secret_clusterA)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get auth secret: %w", err)
-	}
-
-	var secret_clusterB corev1.Secret
-	err = client.Get(ctx, types.NamespacedName{Name: config.AdminAuthSecretRef_ClusterB, Namespace: config.AuthSecretNamespace_ClusterB}, &secret_clusterB)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get auth secret: %w", err)
-	}
-
 	var (
-		usernameA  []byte
-		passwordA  []byte
-		clusterIpA []byte
-		usernameB  []byte
-		passwordB  []byte
-		clusterIpB []byte
-		ok         bool
-		numSVMs    int64
+		username     []byte
+		password     []byte
+		clusterIp    []byte
+		ok           bool
+		ontapConfigs []ontapclient.Config
 	)
 
-	if usernameA, ok = secret_clusterA.Data["username"]; !ok {
-		return nil, fmt.Errorf("unable to fetch username from authsecret")
-	}
-	if passwordA, ok = secret_clusterA.Data["password"]; !ok {
-		return nil, fmt.Errorf("unable to fetch password from authsecret")
+	for _, cluster := range config.Clusters {
+		if cluster.AuthSecretRef == "" || cluster.AuthSecretNamespace == "" {
+			return nil, fmt.Errorf("missing fields in config: cluster=%s, AuthSecretNamespace_ClusterA=%s",
+				cluster, cluster.AuthSecretNamespace)
+		}
 
-	}
-	if clusterIpA, ok = secret_clusterA.Data["clusterIp"]; !ok {
-		return nil, fmt.Errorf("unable to fetch clusterip from authsecret")
+		var clusterSecret corev1.Secret
+		err := client.Get(ctx, types.NamespacedName{Name: cluster.AuthSecretRef, Namespace: cluster.AuthSecretNamespace}, &clusterSecret)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get auth secret: %w", err)
+		}
 
-	}
-	clientConfigA := ontapclient.Config{
-		AdminUser:     string(usernameA),
-		AdminPassword: string(passwordA),
-		Host:          string(clusterIpA),
-		InsecureTLS:   true,
-	}
+		if username, ok = clusterSecret.Data["username"]; !ok {
+			return nil, fmt.Errorf("unable to fetch username from secret %s", &clusterSecret)
+		}
+		if password, ok = clusterSecret.Data["password"]; !ok {
+			return nil, fmt.Errorf("unable to fetch password from secret %s", &clusterSecret)
 
-	ontapClientA, err := ontapclient.NewAPIClient(clientConfigA)
+		}
+		if clusterIp, ok = clusterSecret.Data["clusterIp"]; !ok {
+			return nil, fmt.Errorf("unable to fetch clusterip from secret %s", &clusterSecret)
+
+		}
+		clusterClientConfig := ontapclient.Config{
+			AdminUser:     string(username),
+			AdminPassword: string(password),
+			Host:          string(clusterIp),
+			InsecureTLS:   true,
+		}
+
+		ontapConfigs = append(ontapConfigs, clusterClientConfig)
+	}
+	metroClusterClient, err := ontapclient.NewMetroClusterClient(ontapConfigs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ONTAP API client: %w", err)
-	}
-	paramsA := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
-	result, err := ontapClientA.SVM.SvmCollectionGet(paramsA, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to ONTAP API for cluster A and list SVMs: %w", err)
+		return nil, err
 	}
 
-	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
-		numSVMs = *result.Payload.NumRecords
-	}
-	log.Info("Successfully connected to ONTAP Client from Cluster A. Found existing SVMs", "svms", numSVMs)
-
-	if usernameB, ok = secret_clusterA.Data["username"]; !ok {
-		return nil, fmt.Errorf("unable to fetch username from authsecret")
-
-	}
-	if passwordB, ok = secret_clusterA.Data["password"]; !ok {
-		return nil, fmt.Errorf("unable to fetch password from authsecret")
-
-	}
-	if clusterIpB, ok = secret_clusterA.Data["clusterIp"]; !ok {
-		return nil, fmt.Errorf("unable to fetch clusterip from authsecret")
-
-	}
-	clientConfigB := ontapclient.Config{
-		AdminUser:     string(usernameB),
-		AdminPassword: string(passwordB),
-		Host:          string(clusterIpB),
-		InsecureTLS:   true,
+	// Get statistics of cluster, can be updated in the future to check the state or capacity to choose cluster for the client
+	for _, client := range *metroClusterClient {
+		cgparams := cluster.NewClusterGetParamsWithContext(ctx)
+		cgok, err := client.Cluster.ClusterGet(cgparams, nil)
+		if err != nil {
+			return nil, err
+		}
+		clusterResponse := cgok.Payload
+		log.Info("Successfully connected to ONTAP cluster from cluster %s with statistics %s.", clusterResponse.Name, clusterResponse.Statistics)
+		//for now just return the first client
+		// TODO creat logic to switch between clients
+		return &client, nil
 	}
 
-	ontapClientB, err := ontapclient.NewAPIClient(clientConfigB)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ONTAP API client: %w", err)
-	}
-	paramsB := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
-	result, err = ontapClientB.SVM.SvmCollectionGet(paramsB, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to ONTAP API for cluster b and list SVMs: %w", err)
-	}
-
-	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
-		numSVMs = *result.Payload.NumRecords
-	}
-	log.Info("Successfully connected to ONTAP Client from Cluster B. Found existing SVMs", "svms", numSVMs)
-
-	mcclient := ontapclient.MetroClusterClient{
-		ClusterA: ontapClientA,
-		ClusterB: ontapClientB,
-	}
-
-	return &mcclient, nil
+	return nil, nil
 }
 
 // Reconcile handles extension creation and updates.
