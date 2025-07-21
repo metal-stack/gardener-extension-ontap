@@ -2,6 +2,8 @@ package trident
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 
@@ -66,8 +68,7 @@ func (m *SvnManager) CreateUserAndSecret(ctx context.Context, opts userAndSecret
 			m.log.Info("seed Secret missing for first shoot, creating...")
 			tridentSecret := buildSecret(secretName, defaultSVMUsername, password, opts.projectID, opts.svmSeedSecretNamespace)
 			// make this use of managedResource aswell, otherwise seed secret can be deleted
-			err := opts.seedClient.Create(ctx, tridentSecret)
-			if err != nil {
+			if err := opts.seedClient.Create(ctx, tridentSecret); err != nil {
 				return fmt.Errorf("creating secret in seed failed: %w", err)
 			}
 			return nil
@@ -90,16 +91,21 @@ func (m *SvnManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOp
 	// Secret also exists and is valid.
 	if errors.Is(secretErr, ErrAlreadyExists) {
 		m.log.Info("User exists on ONTAP and K8s secret is present", "username", opts.username, "svm", opts.svmName)
-		return passwordFromSecret, ErrAlreadyExists
+		return passwordFromSecret, nil
 	}
 
 	// This block is only reached if userExistsOnOntap was determined to be false earlier.
-	password := generateSecurePassword()
+	password, err := generateSecurePassword()
+	if err != nil {
+		return "", err
+	}
 
-	application := "http"
-	authMethod := "password"
-	pwdVal := strfmt.Password(password)
-	vsadminRole := "vsadmin"
+	var (
+		application = "http"
+		authMethod  = "password"
+		pwdVal      = strfmt.Password(password)
+		vsadminRole = "vsadmin"
+	)
 
 	createAccountParams := security.NewAccountCreateParams()
 	createAccountParams.SetInfo(&models.Account{
@@ -122,8 +128,7 @@ func (m *SvnManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOp
 		},
 	})
 
-	_, createErr := m.ontapClient.Security.AccountCreate(createAccountParams, nil)
-	if createErr != nil {
+	if _, createErr := m.ontapClient.Security.AccountCreate(createAccountParams, nil); createErr != nil {
 		return "", fmt.Errorf("failed to create ONTAP user '%s' for SVM '%s': %w", opts.username, opts.svmName, createErr)
 	}
 
@@ -154,10 +159,16 @@ func (m *SvnManager) checkIfAccountExistsForSvm(ctx context.Context, svmName str
 	return "", ErrSeedSecretMissing
 }
 
-// very secure password for now
-// FIXME what is this for
-func generateSecurePassword() string {
-	return "fsqe2020"
+func generateSecurePassword() (string, error) {
+	length := 8
+	buff := make([]byte, length)
+	_, err := rand.Read(buff)
+	if err != nil {
+		return "", fmt.Errorf("unable to create a random password:%w", err)
+	}
+	str := base64.StdEncoding.EncodeToString(buff)
+	// Base 64 can be longer than length
+	return str[:length], nil
 }
 
 // buildSecret creates a secret with the SVM credentials in the specified namespace
