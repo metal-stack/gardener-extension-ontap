@@ -390,9 +390,14 @@ func (m *SvnManager) waitForSvmReady(ctx context.Context, svmName string) (strin
 			return fmt.Errorf("svm exist but not in running state yet:%s", currentState)
 		}
 
-		m.log.Info("SVM is ready", "svmName", svmName, "uuid", svmUUID, "state", currentState)
-		uuid = svmUUID
-		return nil
+		if svmInfo.Payload.Nvme != nil && svmInfo.Payload.Nvme.Enabled != nil && *svmInfo.Payload.Nvme.Enabled {
+			m.log.Info("SVM is ready and NVMe is enabled", "svmName", svmName, "uuid", svmUUID, "state", currentState)
+			uuid = svmUUID
+			return nil
+		}
+
+		m.log.Info("SVM is running but NVMe is not yet enabled, retrying...", "svmName", svmName)
+		return fmt.Errorf("SVM is running but NVMe is not yet enabled")
 	},
 		retry.Attempts(10),
 		retry.MaxDelay(5*time.Second),
