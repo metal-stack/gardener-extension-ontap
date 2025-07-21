@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"net/netip"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -34,9 +35,16 @@ func (c *TridentConfig) Validate() error {
 	if c.SvmIpaddresses.ManagementLif == "" {
 		return fmt.Errorf("management LIF IP address must be provided")
 	}
+	if _, err := netip.ParseAddr(c.SvmIpaddresses.ManagementLif); err != nil {
+		return fmt.Errorf("given management LIF IP %s is not a valid ip address:%w", c.SvmIpaddresses.ManagementLif, err)
+	}
+
 	for i, ip := range c.SvmIpaddresses.DataLifs {
 		if ip == "" {
 			return fmt.Errorf("data LIF at index %d cannot be empty", i)
+		}
+		if _, err := netip.ParseAddr(ip); err != nil {
+			return fmt.Errorf("given data LIF %s is not a valid ip address:%w", ip, err)
 		}
 	}
 	return nil

@@ -52,7 +52,7 @@ var (
 	backendPath     = filepath.Join(resourcesPath, "backends")
 	svmSecretsPath  = filepath.Join(resourcesPath, "secrets")
 
-	tridentRessourceToDeploy = []trident.TridentResource{
+	tridentResourceToDeploy = []trident.TridentResource{
 		{Name: tridentInitMR, Path: tridentInitPath, WaitForHealthy: false},
 		{Name: tridentCRDsName, Path: crdPath, WaitForHealthy: true},
 		{Name: tridentBackendsMR, Path: backendPath, WaitForHealthy: false},
@@ -198,7 +198,6 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return err
 	}
 
-	// FIXME check username/passwort created per k8s cluster
 	seedsecretName := fmt.Sprintf(trident.SecretNameFormat, projectId)
 	a.log.Info("Using credentials from secret in shoot cluster", "secretName", seedsecretName, "namespace", "kube-system")
 
@@ -225,7 +224,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		Username:        string(username),
 		Password:        string(password),
 	}
-	err := trident.DeployTrident(ctx, a.log, a.client, tridentValues, tridentRessourceToDeploy)
+	err := trident.DeployTrident(ctx, a.log, a.client, tridentValues, tridentResourceToDeploy)
 	if err != nil {
 		return err
 	}

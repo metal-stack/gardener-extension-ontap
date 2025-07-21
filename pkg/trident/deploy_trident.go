@@ -35,9 +35,57 @@ type TridentResource struct {
 	WaitForHealthy bool
 }
 
-// LoadYAMLFiles walks the given directory path and reads all YAML files,
+// DeployTrident deploys Trident using the provided values and resources.
+func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client, tridentValues DeployTridentValues, tridentResourceToDeploy []TridentResource) error {
+	for _, resource := range tridentResourceToDeploy {
+		log.Info("loading YAML files for resource", "resource", resource.Name)
+		yamlBytes, err := loadYAMLFiles(resource.Path)
+		if err != nil {
+			return err
+		}
+
+		// FIXME Will be changed to go template
+		switch resource.Name {
+		case "trident-backends":
+			key := backendConfigFilename
+			config, ok := yamlBytes[key]
+			if !ok {
+				return fmt.Errorf("backend config file '%s' not found in loaded YAMLs for %s", key, resource.Name)
+			}
+			configStr := string(config)
+			configStr = strings.ReplaceAll(configStr, "${PROJECT_ID}", tridentValues.ProjectId)
+			configStr = strings.ReplaceAll(configStr, "${SECRET_NAME}", *tridentValues.SeedsecretName)
+			configStr = strings.ReplaceAll(configStr, "${MANAGEMENT_LIF_IP}", tridentValues.ManagementLifIp)
+			yamlBytes[key] = []byte(configStr)
+			log.Info("Templated backend config", "resource", resource.Name)
+
+		case "trident-svm-secret" :
+			key := svmShootSecretFilename
+			secret, ok := yamlBytes[key]
+			if !ok {
+				return fmt.Errorf("secret template file '%s' not found in loaded YAMLs for %s", key, resource.Name)
+			}
+			secretStr := string(secret)
+			secretStr = strings.ReplaceAll(secretStr, "${SECRET_NAME}", *tridentValues.SeedsecretName)
+			secretStr = strings.ReplaceAll(secretStr, "${NAMESPACE}", "kube-system") // not shoot namespace in seed, create this in kube-system ns in shoot
+			secretStr = strings.ReplaceAll(secretStr, "${PROJECT_ID}", tridentValues.ProjectId)
+			secretStr = strings.ReplaceAll(secretStr, "${USER_NAME}", tridentValues.Username)
+			secretStr = strings.ReplaceAll(secretStr, "${PASSWORD}", tridentValues.Password)
+			yamlBytes[key] = []byte(secretStr)
+			log.Info("Templated SVM secret", "resource", resource.Name)			
+		}
+
+		err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// loadYAMLFiles walks the given directory path and reads all YAML files,
 // returning them in a map where the key is the relative path with '/' replaced by '.'.
-func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
+func loadYAMLFiles(dirPath string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	// Check if the base directory exists
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
@@ -77,8 +125,8 @@ func LoadYAMLFiles(dirPath string) (map[string][]byte, error) {
 	return result, nil
 }
 
-// DeployResources deploys the provided YAML data as a managed resource.
-func DeployResources(
+// deployResources deploys the provided YAML data as a managed resource.
+func deployResources(
 	ctx context.Context,
 	log logr.Logger,
 	k8sClient client.Client,
@@ -114,53 +162,5 @@ func DeployResources(
 	}
 
 	log.Info("successfully initiated deployment for managed resource", "name", resourceName)
-	return nil
-}
-
-// DeployTrident deploys Trident using the provided values and resources.
-func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client, tridentValues DeployTridentValues, tridentRessourceToDeploy []TridentResource) error {
-	for _, resource := range tridentRessourceToDeploy {
-		log.Info("loading YAML files for resource", "resource", resource.Name)
-		yamlBytes, err := LoadYAMLFiles(resource.Path)
-		if err != nil {
-			return err
-		}
-
-		// FIXXME Will be changed for sure
-		if resource.Name == "trident-backends" {
-			key := backendConfigFilename
-			config, ok := yamlBytes[key]
-			if !ok {
-				return fmt.Errorf("backend config file '%s' not found in loaded YAMLs for %s", key, resource.Name)
-			}
-			configStr := string(config)
-			configStr = strings.ReplaceAll(configStr, "${PROJECT_ID}", tridentValues.ProjectId)
-			configStr = strings.ReplaceAll(configStr, "${SECRET_NAME}", *tridentValues.SeedsecretName)
-			configStr = strings.ReplaceAll(configStr, "${MANAGEMENT_LIF_IP}", tridentValues.ManagementLifIp)
-			yamlBytes[key] = []byte(configStr)
-			log.Info("Templated backend config", "resource", resource.Name)
-		}
-
-		if resource.Name == "trident-svm-secret" {
-			key := svmShootSecretFilename
-			secret, ok := yamlBytes[key]
-			if !ok {
-				return fmt.Errorf("secret template file '%s' not found in loaded YAMLs for %s", key, resource.Name)
-			}
-			secretStr := string(secret)
-			secretStr = strings.ReplaceAll(secretStr, "${SECRET_NAME}", *tridentValues.SeedsecretName)
-			secretStr = strings.ReplaceAll(secretStr, "${NAMESPACE}", "kube-system") // not shoot namespace in seed, create this in kube-system ns in shoot
-			secretStr = strings.ReplaceAll(secretStr, "${PROJECT_ID}", tridentValues.ProjectId)
-			secretStr = strings.ReplaceAll(secretStr, "${USER_NAME}", tridentValues.Username)
-			secretStr = strings.ReplaceAll(secretStr, "${PASSWORD}", tridentValues.Password)
-			yamlBytes[key] = []byte(secretStr)
-			log.Info("Templated SVM secret", "resource", resource.Name)
-		}
-
-		err = DeployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
