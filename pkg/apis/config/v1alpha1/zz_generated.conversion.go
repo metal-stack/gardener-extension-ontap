@@ -39,8 +39,10 @@ func RegisterConversions(s *runtime.Scheme) error {
 }
 
 func autoConvert_v1alpha1_ControllerConfiguration_To_config_ControllerConfiguration(in *ControllerConfiguration, out *config.ControllerConfiguration, s conversion.Scope) error {
-	out.AdminAuthSecretRef = in.AdminAuthSecretRef
-	out.AuthSecretNamespace = in.AuthSecretNamespace
+	out.AdminAuthSecretRef_ClusterA = in.AdminAuthSecretRef_ClusterA
+	out.AuthSecretNamespace_ClusterA = in.AuthSecretNamespace_ClusterA
+	out.AdminAuthSecretRef_ClusterB = in.AdminAuthSecretRef_ClusterB
+	out.AuthSecretNamespace_ClusterB = in.AuthSecretNamespace_ClusterB
 	out.HealthCheckConfig = (*configv1alpha1.HealthCheckConfig)(unsafe.Pointer(in.HealthCheckConfig))
 	return nil
 }
@@ -51,8 +53,10 @@ func Convert_v1alpha1_ControllerConfiguration_To_config_ControllerConfiguration(
 }
 
 func autoConvert_config_ControllerConfiguration_To_v1alpha1_ControllerConfiguration(in *config.ControllerConfiguration, out *ControllerConfiguration, s conversion.Scope) error {
-	out.AdminAuthSecretRef = in.AdminAuthSecretRef
-	out.AuthSecretNamespace = in.AuthSecretNamespace
+	out.AdminAuthSecretRef_ClusterA = in.AdminAuthSecretRef_ClusterA
+	out.AuthSecretNamespace_ClusterA = in.AuthSecretNamespace_ClusterA
+	out.AdminAuthSecretRef_ClusterB = in.AdminAuthSecretRef_ClusterB
+	out.AuthSecretNamespace_ClusterB = in.AuthSecretNamespace_ClusterB
 	out.HealthCheckConfig = (*configv1alpha1.HealthCheckConfig)(unsafe.Pointer(in.HealthCheckConfig))
 	return nil
 }

@@ -11,11 +11,17 @@ import (
 type ControllerConfiguration struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// AuthSecretRef references to the secret which contains the auth credentials to connect to the ontap rest api.
-	AdminAuthSecretRef string `json:"adminAuthSecret,omitempty"`
+	// AuthSecretRef references to the secret which contains the auth credentials to connect to the ontap rest api for cluster A
+	AdminAuthSecretRef_ClusterA string `json:"adminAuthSecretclusterA,omitempty"`
 
-	// AuthSecretNamespace references the shoot namespace where the secret is stored to access the svm
-	AuthSecretNamespace string `json:"authSecretNamespace,omitempty"`
+	// AuthSecretNamespace references the shoot namespace where the secret is stored to access the svm for cluster A
+	AuthSecretNamespace_ClusterA string `json:"authSecretNamespaceclusterA,omitempty"`
+
+	// AuthSecretRef references to the secret which contains the auth credentials to connect to the ontap rest api for cluster B
+	AdminAuthSecretRef_ClusterB string `json:"adminAuthSecretclusterB,omitempty"`
+
+	// AuthSecretNamespace references the shoot namespace where the secret is stored to access the svm for cluster B
+	AuthSecretNamespace_ClusterB string `json:"authSecretNamespaceclusterB,omitempty"`
 
 	// HealthCheckConfig is the config for the health check controller
 	// +optional

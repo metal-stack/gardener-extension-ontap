@@ -12,11 +12,17 @@ import (
 type ControllerConfiguration struct {
 	metav1.TypeMeta
 
-	// AdminAuthSecretRef references to the secret which contains the auth credentials to connect to the cluster management ip
-	AdminAuthSecretRef string
+	// AdminAuthSecretRef references to the secret which contains the auth credentials to connect to the cluster management ip for cluster A
+	AdminAuthSecretRef_ClusterA string
 
-	// AuthSecretNamespace references the seed namespace where the secret is stored to access the cluster management ip
-	AuthSecretNamespace string
+	// AuthSecretNamespace references the seed namespace where the secret is stored to access the cluster management ip for cluster A
+	AuthSecretNamespace_ClusterA string
+
+	// AdminAuthSecretRef references to the secret which contains the auth credentials to connect to the cluster management ip for cluster B
+	AdminAuthSecretRef_ClusterB string
+
+	// AuthSecretNamespace references the seed namespace where the secret is stored to access the cluster management ip for cluster B
+	AuthSecretNamespace_ClusterB string
 
 	// HealthCheckConfig is the config for the health check controller
 	HealthCheckConfig *healthcheckconfig.HealthCheckConfig
