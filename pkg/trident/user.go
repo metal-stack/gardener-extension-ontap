@@ -1,12 +1,12 @@
-package services
+package trident
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 
-	"github.com/gardener/gardener/pkg/client/kubernetes"
-	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/metal-stack/metal-lib/pkg/pointer"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,8 +67,8 @@ func (m *SvnManager) CreateUserAndSecret(ctx context.Context, opts userAndSecret
 		if errors.Is(err, ErrSeedSecretMissing) {
 			m.log.Info("seed Secret missing for first shoot, creating...")
 			tridentSecret := buildSecret(secretName, defaultSVMUsername, password, opts.projectID, opts.svmSeedSecretNamespace)
-			err := opts.seedClient.Create(ctx, tridentSecret)
-			if err != nil {
+			// make this use of managedResource aswell, otherwise seed secret can be deleted
+			if err := opts.seedClient.Create(ctx, tridentSecret); err != nil {
 				return fmt.Errorf("creating secret in seed failed: %w", err)
 			}
 			return nil
@@ -91,16 +91,21 @@ func (m *SvnManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOp
 	// Secret also exists and is valid.
 	if errors.Is(secretErr, ErrAlreadyExists) {
 		m.log.Info("User exists on ONTAP and K8s secret is present", "username", opts.username, "svm", opts.svmName)
-		return passwordFromSecret, ErrAlreadyExists
+		return passwordFromSecret, nil
 	}
 
 	// This block is only reached if userExistsOnOntap was determined to be false earlier.
-	password := generateSecurePassword()
+	password, err := generateSecurePassword()
+	if err != nil {
+		return "", err
+	}
 
-	application := "http"
-	authMethod := "password"
-	pwdVal := strfmt.Password(password)
-	vsadminRole := "vsadmin"
+	var (
+		application = "http"
+		authMethod  = "password"
+		pwdVal      = strfmt.Password(password)
+		vsadminRole = "vsadmin"
+	)
 
 	createAccountParams := security.NewAccountCreateParams()
 	createAccountParams.SetInfo(&models.Account{
@@ -123,8 +128,7 @@ func (m *SvnManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOp
 		},
 	})
 
-	_, createErr := m.ontapClient.Security.AccountCreate(createAccountParams, nil)
-	if createErr != nil {
+	if _, createErr := m.ontapClient.Security.AccountCreate(createAccountParams, nil); createErr != nil {
 		return "", fmt.Errorf("failed to create ONTAP user '%s' for SVM '%s': %w", opts.username, opts.svmName, createErr)
 	}
 
@@ -155,41 +159,16 @@ func (m *SvnManager) checkIfAccountExistsForSvm(ctx context.Context, svmName str
 	return "", ErrSeedSecretMissing
 }
 
-// very secure password for now
-// FIXME what is this for
-func generateSecurePassword() string {
-	return "fsqe2020"
-}
-
-// deployTridentSecrets creates or updates the secret for Trident
-func (m *SvnManager) DeployTridentSecretsInShootAsMR(ctx context.Context, opts DeployTridentSecretsOptions) error {
-
-	// Create the secret in the shoot namespace instead of kube-system
-	tridentSecret := buildSecret(opts.SecretName, opts.UserName, string(opts.Password), opts.ProjectID, "kube-system")
-	clientObjs := []client.Object{tridentSecret}
-	shootResources, err := managedresources.
-		NewRegistry(kubernetes.ShootScheme, kubernetes.ShootCodec, kubernetes.ShootSerializer).
-		AddAllAndSerialize(clientObjs...)
+func generateSecurePassword() (string, error) {
+	length := 8
+	buff := make([]byte, length)
+	_, err := rand.Read(buff)
 	if err != nil {
-		return fmt.Errorf("failed to serialize trident resources: %w", err)
+		return "", fmt.Errorf("unable to create a random password:%w", err)
 	}
-
-	err = managedresources.CreateForShoot(
-		ctx,
-		m.seedClient,
-		opts.ShootNamespace,
-		"trident-credentials",
-		"kube-system",
-		false,
-		shootResources,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create ManagedResource for credentials: %w", err)
-	}
-	m.log.Info("Trident credentials secret created and confirmed healthy",
-		"projectId", opts.ProjectID,
-		"shootNamespace", opts.ShootNamespace)
-	return nil
+	str := base64.StdEncoding.EncodeToString(buff)
+	// Base 64 can be longer than length
+	return str[:length], nil
 }
 
 // buildSecret creates a secret with the SVM credentials in the specified namespace
