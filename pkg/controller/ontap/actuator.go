@@ -101,12 +101,12 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	}
 
 	if config.AdminAuthSecretRef_ClusterA == "" || config.AuthSecretNamespace_ClusterA == "" {
-		return nil, fmt.Errorf("missing fields in config: AdminAuthSecretRef=%s, AuthSecretNamespace=%s",
+		return nil, fmt.Errorf("missing fields in config: AdminAuthSecretRef_ClusterA=%s, AuthSecretNamespace_ClusterA=%s",
 			config.AdminAuthSecretRef_ClusterA, config.AuthSecretNamespace_ClusterA)
 	}
 
 	if config.AdminAuthSecretRef_ClusterB == "" || config.AuthSecretNamespace_ClusterB == "" {
-		return nil, fmt.Errorf("missing fields in config: AdminAuthSecretRef=%s, AuthSecretNamespace=%s",
+		return nil, fmt.Errorf("missing fields in config: config.AdminAuthSecretRef_ClusterB=%s, AuthSecretNamespace_ClusterB=%s",
 			config.AdminAuthSecretRef_ClusterB, config.AuthSecretNamespace_ClusterB)
 	}
 
@@ -158,7 +158,7 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	paramsA := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
 	result, err := ontapClientA.SVM.SvmCollectionGet(paramsA, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
+		return nil, fmt.Errorf("failed to connect to ONTAP API for cluster A and list SVMs: %w", err)
 	}
 
 	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
@@ -192,13 +192,13 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	paramsB := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
 	result, err = ontapClientB.SVM.SvmCollectionGet(paramsB, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to ONTAP API and list SVMs: %w", err)
+		return nil, fmt.Errorf("failed to connect to ONTAP API for cluster b and list SVMs: %w", err)
 	}
 
 	if result != nil && result.Payload != nil && result.Payload.NumRecords != nil {
 		numSVMs = *result.Payload.NumRecords
 	}
-	log.Info("Successfully connected to ONTAP Client from Cluster A. Found existing SVMs", "svms", numSVMs)
+	log.Info("Successfully connected to ONTAP Client from Cluster B. Found existing SVMs", "svms", numSVMs)
 
 	mcclient := ontapclient.MetroClusterClient{
 		ClusterA: ontapClientA,
