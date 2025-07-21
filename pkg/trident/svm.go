@@ -1,4 +1,4 @@
-package services
+package trident
 
 import (
 	"context"
@@ -101,12 +101,11 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	}
 
 	m.log.Info("Sending SVM create request", "params", fmt.Sprintf("%+v", params))
-	_, _, err = m.ontapClient.SVM.SvmCreate(params, nil)
-	if err != nil {
+	if _, _, err = m.ontapClient.SVM.SvmCreate(params, nil); err != nil {
 		return fmt.Errorf("failed to create SVM %s: %w", opts.ProjectID, err)
 	}
-	m.log.Info("SVM created successfully", "name", opts.ProjectID, "aggregateUUID", *chosenAggregateUUID)
 
+	m.log.Info("SVM created successfully", "name", opts.ProjectID, "aggregateUUID", *chosenAggregateUUID)
 	// 4. Wait for SVM to be ready and get its UUID
 	svmUUID, err := m.waitForSvmReady(opts.ProjectID)
 	if err != nil {
@@ -115,18 +114,17 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	m.log.Info("SVM is ready", "projectId", opts.ProjectID, "uuid", svmUUID)
 
 	// 5. Create data LIFs
-	for _, datalifIp := range opts.SvmIpaddresses.DataLifs {
+	for i, datalifIp := range opts.SvmIpaddresses.DataLifs {
 		dataLifOpts := networkInterfaceOptions{
 			svmUUID:   svmUUID,
 			svmName:   opts.ProjectID,
 			ipAddress: datalifIp,
-			lifName:   dataLifTag,
+			lifName:   fmt.Sprintf("%s+%d", dataLifTag, i),
 			// TODO:needs to be adjusted so ips are created distributed on both nodes, PR is open for this already
 			nodeUUID:  nodeUUID,
 			isDataLif: true,
 		}
-		err = m.createNetworkInterfaceForSvm(dataLifOpts)
-		if err != nil {
+		if err := m.createNetworkInterfaceForSvm(dataLifOpts); err != nil {
 			return fmt.Errorf("failed to create data LIF for SVM %s: %w", opts.ProjectID, err)
 		}
 	}
@@ -140,8 +138,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		nodeUUID:  nodeUUID,
 		isDataLif: false,
 	}
-	err = m.createNetworkInterfaceForSvm(mgmtLifOpts)
-	if err != nil {
+	if err := m.createNetworkInterfaceForSvm(mgmtLifOpts); err != nil {
 		return fmt.Errorf("failed to create management LIF for SVM %s: %w", opts.ProjectID, err)
 	}
 
@@ -153,7 +150,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		seedClient:             m.seedClient,
 		svmUUID:                svmUUID,
 	}
-	if err = m.CreateUserAndSecret(ctx, userOpts); err != nil {
+	if err := m.CreateUserAndSecret(ctx, userOpts); err != nil {
 		return fmt.Errorf("SVM %s created, but failed to create user and secret: %w", opts.ProjectID, err)
 	}
 
@@ -179,9 +176,9 @@ func (m *SvnManager) findSuitableAggregateForNode(nodeUUID string) (*string, err
 	}
 
 	var (
-		bestUUID     *string
-		maxAvailable int64 = -1
-		bestName     string
+		bestUUID                 *string
+		maxAvailableBlockStorage int64 = -1
+		bestName                 string
 	)
 
 	m.log.Info("Filtering aggregates on node", "nodeUUID", nodeUUID, "totalFound", *result.Payload.NumRecords)
@@ -199,23 +196,23 @@ func (m *SvnManager) findSuitableAggregateForNode(nodeUUID string) (*string, err
 
 		// Skip if not online
 		if *record.State != "online" {
-			m.log.Info("Skipping offline aggregate", "name", *record.Name)
+			m.log.Info("Skipping offline aggregate", "name", *record.Name, "state", *record.State)
 			continue
 		}
 		// We might wanna skip root aggregate too
 
-		// Skip if no available space info
-		available := record.Space.BlockStorage.Available
-		if available == nil || *available <= 0 {
+		// Skip if no availableBlockStorage space info
+		availableBlockStorage := record.Space.BlockStorage.Available
+		if availableBlockStorage == nil || *availableBlockStorage <= 0 {
 			continue
 		}
 
 		// Keep track of the aggregate with the most available space
-		if *available > maxAvailable {
-			maxAvailable = *available
+		if *availableBlockStorage > maxAvailableBlockStorage {
+			maxAvailableBlockStorage = *availableBlockStorage
 			bestUUID = record.UUID
 			bestName = *record.Name
-			m.log.Info("Found better aggregate", "name", *record.Name, "available", *available)
+			m.log.Info("Found better aggregate", "name", *record.Name, "available", *availableBlockStorage)
 		}
 	}
 
@@ -223,7 +220,7 @@ func (m *SvnManager) findSuitableAggregateForNode(nodeUUID string) (*string, err
 		return nil, fmt.Errorf("no suitable aggregates found on node %s", nodeUUID)
 	}
 
-	m.log.Info("Selected aggregate with most available space", "name", bestName, "uuid", *bestUUID, "availableBytes", maxAvailable)
+	m.log.Info("Selected aggregate with most available space", "name", bestName, "uuid", *bestUUID, "availableBytes", maxAvailableBlockStorage)
 	return bestUUID, nil
 }
 
@@ -246,6 +243,10 @@ func (m *SvnManager) getFirstNodeInCluster() (string, error) {
 	if result.Payload == nil {
 		return "", errors.New("no node information returned")
 	}
+
+	if len(result.Payload.NodeResponseInlineRecords) == 0 {
+		return "", fmt.Errorf("nodeResponseInlineRecords is empty")
+	}
 	nodeUUID := *result.Payload.NodeResponseInlineRecords[0].UUID
 
 	return nodeUUID.String(), nil
@@ -256,8 +257,6 @@ func (m *SvnManager) createNetworkInterfaceForSvm(opts networkInterfaceOptions) 
 
 	m.log.Info("Creating network interface", "svm", opts.svmName, "lifName", opts.lifName, "ip", opts.ipAddress, "node", opts.nodeUUID)
 
-	// setting default netmask to 24, bc 32 is only possible if bgp peer is available and vip lif can be created
-	netmask := "24"
 	params := networking.NewNetworkIPInterfacesCreateParams()
 	// Create the basic interface structure
 	interfaceInfo := &models.IPInterface{
@@ -275,14 +274,22 @@ func (m *SvnManager) createNetworkInterfaceForSvm(opts networkInterfaceOptions) 
 	}
 	m.log.Info("bgp response", "bgp", bgpres)
 	// A bgp neighbor is there
+	// setting default netmask to 24, bc 32 is only possible if bgp peer is available and vip lif can be created
+	netmask := "24"
 	if bgpres.Payload.NumRecords != nil && *bgpres.Payload.NumRecords != 0 {
 		netmask = "32"
 		interfaceInfo.Vip = pointer.Pointer(true)
 	}
+
+	var (
+		address = pointer.Pointer(models.IPAddress(opts.ipAddress))
+		mask    = pointer.Pointer(models.IPNetmask(netmask))
+	)
 	interfaceInfo.IP = &models.IPInfo{
-		Address: (*models.IPAddress)(pointer.Pointer(opts.ipAddress)),
-		Netmask: (*models.IPNetmask)(pointer.Pointer(netmask)),
+		Address: address,
+		Netmask: mask,
 	}
+
 	// Add location information
 	location := &models.IPInterfaceInlineLocation{}
 	location.HomeNode = &models.IPInterfaceInlineLocationInlineHomeNode{
@@ -302,8 +309,7 @@ func (m *SvnManager) createNetworkInterfaceForSvm(opts networkInterfaceOptions) 
 		}
 	}
 	params.SetInfo(interfaceInfo)
-	_, err = m.ontapClient.Networking.NetworkIPInterfacesCreate(params, nil)
-	if err != nil {
+	if _, err := m.ontapClient.Networking.NetworkIPInterfacesCreate(params, nil); err != nil {
 		return fmt.Errorf("failed to create network interface %s for SVM %s: %w", opts.lifName, opts.svmName, err)
 	}
 

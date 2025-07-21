@@ -1,7 +1,9 @@
 package v1alpha1
 
 import (
-	"github.com/go-logr/logr"
+	"fmt"
+	"net/netip"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -23,21 +25,29 @@ type TridentConfig struct {
 // SvmIpaddresses contains the network interface addresses for a Storage Virtual Machine (SVM)
 type SvmIpaddresses struct {
 	// DataLif are the IP addresses for data operations
-	DataLifs []string `json:"dataLif,omitempty"`
+	DataLifs []string `json:"dataLifs,omitempty"`
 
 	// ManagementLif is the IP address for management operations
 	ManagementLif string `json:"managementLif,omitempty"`
 }
 
-func (config *TridentConfig) IsValid(log logr.Logger) bool {
-	// if slices.Contains(config.Protocols, "nvme") {
-	// 	log.Error(errors.New("protocol nvme is required"), "err", "protocols", config.Protocols)
-	// 	return false
-	// }
+func (c *TridentConfig) Validate() error {
+	if c.SvmIpaddresses.ManagementLif == "" {
+		return fmt.Errorf("management LIF IP address must be provided")
+	}
+	if _, err := netip.ParseAddr(c.SvmIpaddresses.ManagementLif); err != nil {
+		return fmt.Errorf("given management LIF IP %s is not a valid ip address:%w", c.SvmIpaddresses.ManagementLif, err)
+	}
 
-	// FIXME more validations
-
-	return true
+	for i, ip := range c.SvmIpaddresses.DataLifs {
+		if ip == "" {
+			return fmt.Errorf("data LIF at index %d cannot be empty", i)
+		}
+		if _, err := netip.ParseAddr(ip); err != nil {
+			return fmt.Errorf("given data LIF %s is not a valid ip address:%w", ip, err)
+		}
+	}
+	return nil
 }
 
 func (config *TridentConfig) ConfigureDefaults(svmName *string, svmSecretRef *string) error {
