@@ -120,7 +120,7 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 		}
 		clusterResponse := cgok.Payload
 
-		log.Info("Successfully connected to ONTAP cluster from cluster %s with statistics %s.", *clusterResponse.Name, *clusterResponse.Statistics)
+		log.Info("Successfully connected to ONTAP cluster", "cluster", *clusterResponse.Name, "statistics", *clusterResponse.Statistics)
 
 		// for now just return the first client
 		// TODO create logic to switch between clients
