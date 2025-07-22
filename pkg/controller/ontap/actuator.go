@@ -166,7 +166,7 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		}
 	}
 
-	return nil, fmt.Errorf("couldn't initalize admin client")
+	return nil, fmt.Errorf("couldn't initialize admin client")
 }
 
 // Reconcile handles extension creation and updates.
