@@ -2,10 +2,10 @@ package trident
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
+
+	"github.com/sethvargo/go-password/password"
 
 	"github.com/metal-stack/metal-lib/pkg/pointer"
 	"github.com/metal-stack/ontap-go/api/models"
@@ -160,15 +160,13 @@ func (m *SvnManager) checkIfAccountExistsForSvm(ctx context.Context, svmName str
 }
 
 func generateSecurePassword() (string, error) {
-	length := 8
-	buff := make([]byte, length)
-	_, err := rand.Read(buff)
+	// Generate a password that is 8 characters long with 2 digits, 2 symbols,
+	// allowing upper and lower case letters, disallowing repeat characters.
+	res, err := password.Generate(8, 2, 2, false, false)
 	if err != nil {
 		return "", fmt.Errorf("unable to create a random password:%w", err)
 	}
-	str := base64.StdEncoding.EncodeToString(buff)
-	// Base 64 can be longer than length
-	return str[:length], nil
+	return res, nil
 }
 
 // buildSecret creates a secret with the SVM credentials in the specified namespace

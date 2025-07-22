@@ -14,6 +14,7 @@ require (
 	github.com/metal-stack/metal-lib v0.23.2
 	github.com/metal-stack/ontap-go v0.1.0
 	github.com/onsi/ginkgo v1.16.5
+	github.com/sethvargo/go-password v0.3.1
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.7
 	k8s.io/api v0.33.2
