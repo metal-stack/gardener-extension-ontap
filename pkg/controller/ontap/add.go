@@ -28,7 +28,7 @@ var (
 			Clusters: []config.Cluster{
 				config.Cluster{
 					Name:                "cluster-A",
-					AuthSecretRef:       "admin-cluster-access-A",
+					AuthSecretRef:       "admin-cluster-access-a",
 					AuthSecretNamespace: "garden",
 				},
 			},
