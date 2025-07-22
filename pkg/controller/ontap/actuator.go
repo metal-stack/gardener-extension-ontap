@@ -80,7 +80,9 @@ func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, conf
 		return nil, err
 	}
 
-	if ontapClient != nil {
+	if ontapClient == nil {
+	  return nil, fmt.Errorf("ontapClient is nil")
+	}
 		client := mgr.GetClient()
 
 		svnManager := trident.NewSvmManager(log, ontapClient, client)
