@@ -81,22 +81,19 @@ func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, conf
 	}
 
 	if ontapClient == nil {
-	  return nil, fmt.Errorf("ontapClient is nil")
+		return nil, fmt.Errorf("ontapClient is nil")
 	}
-		client := mgr.GetClient()
+	client := mgr.GetClient()
 
-		svnManager := trident.NewSvmManager(log, ontapClient, client)
-		return &actuator{
-			log:        log,
-			ontap:      ontapClient,
-			client:     client,
-			svnManager: svnManager,
-			decoder:    serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-			config:     config,
-		}, nil
-	}
-
-	return nil, fmt.Errorf("failed to initalize ontap admin client %w", err)
+	svnManager := trident.NewSvmManager(log, ontapClient, client)
+	return &actuator{
+		log:        log,
+		ontap:      ontapClient,
+		client:     client,
+		svnManager: svnManager,
+		decoder:    serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
+		config:     config,
+	}, nil
 
 }
 
