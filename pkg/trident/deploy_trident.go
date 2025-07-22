@@ -9,6 +9,7 @@ import (
 
 	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/go-logr/logr"
+	"github.com/metal-stack/gardener-extension-ontap/charts/trident/resources/cwnps"
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -77,44 +78,25 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			log.Info("Templated SVM secret", "resource", resource.Name)
 
 		case "trident-cwnp":
-			for i, dataip := range tridentValues.SvmIpAddresses.DataLifs {
-				key := cwnpFileName
-				cwnp, ok := yamlBytes[key]
-				if !ok {
-					return fmt.Errorf("secret template file '%s' not found in loaded YAMLs for %s", key, resource.Name)
-				}
-				cwnpString := string(cwnp)
-				cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_CIDR}", dataip)
-				cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_NAME}", fmt.Sprintf("allow-nvme-port-%d", i))
-				cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PRTCL}", "TCP")
-				cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PORT}", "4420")
-				yamlBytes[key] = []byte(cwnpString)
-				log.Info("Templated SVM secret", "resource", resource.Name)
-				err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
-				if err != nil {
-					return err
-				}
+
+			cwnp := cwnps.CWNP{
+				ManagementLif: tridentValues.SvmIpAddresses.ManagementLif,
+				DataLifs:      tridentValues.SvmIpAddresses.DataLifs,
+			}
+			key := cwnpFileName
+
+			rendered, err := cwnps.ParseCWNP(cwnp)
+			if err != nil {
+				return err
 			}
 
-			managementip := tridentValues.SvmIpAddresses.ManagementLif
-			key := cwnpFileName
-			cwnp, ok := yamlBytes[key]
-			if !ok {
-				return fmt.Errorf("secret template file '%s' not found in loaded YAMLs for %s", key, resource.Name)
-			}
-			cwnpString := string(cwnp)
-			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_CIDR}", managementip)
-			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_NAME}", "allow-ontap-mgmt-port")
-			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PRTCL}", "TCP")
-			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PORT}", "443")
-			yamlBytes[key] = []byte(cwnpString)
-			log.Info("Templated SVM secret", "resource", resource.Name)
+			yamlBytes[key] = []byte(rendered)
+			log.Info("templated cwnps", "resource", resource.Name)
 			err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
 			if err != nil {
 				return err
 			}
 
-			return nil
 		}
 
 		err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
