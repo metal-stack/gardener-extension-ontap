@@ -167,6 +167,8 @@ func generateSecurePassword() (string, error) {
 		return "", fmt.Errorf("unable to create a random password:%w", err)
 	}
 	str := base64.StdEncoding.EncodeToString(buff)
+	// Prepend a simple letter for ontap password requirements
+	str = "A" + str
 	// Base 64 can be longer than length
 	return str[:length], nil
 }
