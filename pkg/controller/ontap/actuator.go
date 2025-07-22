@@ -95,11 +95,13 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 
 	for _, cluster := range config.Clusters {
 		clusterClientConfig := ontapclient.Config{
-			AdminUser:     cluster.Name,
+			AdminUser:     cluster.Username,
 			AdminPassword: cluster.Password,
 			Host:          cluster.IPAddress,
 			InsecureTLS:   true,
 		}
+
+		log.Info("adding cluster config", "cluster", cluster.Name, "user", cluster.Username, "ip", cluster.IPAddress)
 
 		ontapConfigs = append(ontapConfigs, clusterClientConfig)
 	}
