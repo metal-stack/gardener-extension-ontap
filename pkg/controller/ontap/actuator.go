@@ -103,6 +103,11 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		return nil, fmt.Errorf("kubernetes client is not initialized")
 	}
 
+	err := config.Validate()
+	if err != nil {
+		return nil, err
+	}
+
 	var (
 		username     []byte
 		password     []byte
@@ -112,13 +117,9 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	)
 
 	for _, cluster := range config.Clusters {
-		if cluster.AuthSecretRef == "" || cluster.AuthSecretNamespace == "" {
-			return nil, fmt.Errorf("missing fields in config: cluster=%s, AuthSecretNamespace_ClusterA=%s",
-				cluster, cluster.AuthSecretNamespace)
-		}
 
 		var clusterSecret corev1.Secret
-		err := client.Get(ctx, types.NamespacedName{Name: cluster.AuthSecretRef, Namespace: cluster.AuthSecretNamespace}, &clusterSecret)
+		err = client.Get(ctx, types.NamespacedName{Name: cluster.AuthSecretRef, Namespace: cluster.AuthSecretNamespace}, &clusterSecret)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get auth secret: %w", err)
 		}

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	healthcheckconfig "github.com/gardener/gardener/extensions/pkg/apis/config/v1alpha1"
@@ -26,4 +28,14 @@ type Cluster struct {
 	AuthSecretRef string
 	// AuthSecretNamespace references the seed namespace where the secret is stored to access the cluster management ip for cluster A
 	AuthSecretNamespace string
+}
+
+func (c *ControllerConfiguration) Validate() error {
+	for _, cluster := range c.Clusters {
+		if cluster.AuthSecretRef == "" || cluster.AuthSecretNamespace == "" {
+			return fmt.Errorf("missing fields in config: cluster=%s, cluster secret namespace=%s, cluster secret ref=%s", cluster, cluster.AuthSecretNamespace, cluster.AuthSecretRef)
+		}
+	}
+
+	return nil
 }
