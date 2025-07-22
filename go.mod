@@ -10,7 +10,7 @@ require (
 	github.com/go-openapi/strfmt v0.23.0
 	github.com/golang/mock v1.6.0
 	github.com/metal-stack/metal-lib v0.21.0
-	github.com/metal-stack/ontap-go v0.0.0-20250225113607-1d029de7cf3c
+	github.com/metal-stack/ontap-go v0.1.0
 	github.com/onsi/ginkgo v1.16.5
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6

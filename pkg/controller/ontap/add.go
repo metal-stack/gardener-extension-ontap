@@ -25,8 +25,13 @@ var (
 	DefaultAddOptions = AddOptions{
 
 		Config: config.ControllerConfiguration{
-			AdminAuthSecretRef:  "admin-access",
-			AuthSecretNamespace: "garden",
+			Clusters: []config.Cluster{
+				config.Cluster{
+					Name:                "cluster-A",
+					AuthSecretRef:       "admin-cluster-access-a",
+					AuthSecretNamespace: "garden",
+				},
+			},
 		},
 	}
 )
