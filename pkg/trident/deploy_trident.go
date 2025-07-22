@@ -104,7 +104,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			}
 			cwnpString := string(cwnp)
 			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_CIDR}", managementip)
-			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_NAME}", fmt.Sprintf("allow-ontap-mgmt-port"))
+			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_NAME}", "allow-ontap-mgmt-port")
 			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PRTCL}", "TCP")
 			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PORT}", "443")
 			yamlBytes[key] = []byte(cwnpString)
