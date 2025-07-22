@@ -160,10 +160,13 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		log.Info("Successfully connected to ONTAP cluster from cluster %s with statistics %s.", clusterResponse.Name, clusterResponse.Statistics)
 		//for now just return the first client
 		// TODO creat logic to switch between clients
-		return &client, nil
+		if *clusterResponse.Statistics.Status == "ok" {
+			return &client, nil
+
+		}
 	}
 
-	return nil, nil
+	return nil, fmt.Errorf("couldn't initalize admin client")
 }
 
 // Reconcile handles extension creation and updates.
