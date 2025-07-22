@@ -1,0 +1,12 @@
+apiVersion: metal-stack.io/v1
+kind: ClusterwideNetworkPolicy
+metadata:
+  namespace: firewall
+  name: ${CWNP_NAME}
+spec:
+  egress:
+  - to:
+    - cidr: ${CWNP_CIDR}/32
+    ports:
+    - protocol: ${CWNP_PRTCL}
+      port: ${CWNP_PORT}

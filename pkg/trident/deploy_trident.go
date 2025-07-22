@@ -9,6 +9,7 @@ import (
 
 	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/go-logr/logr"
+	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -18,15 +19,16 @@ const (
 	storageClassFilename   = "storageclass.yaml"
 	backendConfigFilename  = "backend-config.yaml"
 	svmShootSecretFilename = "svm-shoot-secret.yaml"
+	cwnpFileName           = "cwnp.yaml"
 )
 
 type DeployTridentValues struct {
-	Namespace       string
-	ProjectId       string
-	SeedsecretName  *string
-	ManagementLifIp string
-	Username        string
-	Password        string
+	Namespace      string
+	ProjectId      string
+	SeedsecretName *string
+	SvmIpAddresses ontapv1alpha1.SvmIpaddresses
+	Username       string
+	Password       string
 }
 
 type TridentResource struct {
@@ -55,11 +57,11 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			configStr := string(config)
 			configStr = strings.ReplaceAll(configStr, "${PROJECT_ID}", tridentValues.ProjectId)
 			configStr = strings.ReplaceAll(configStr, "${SECRET_NAME}", *tridentValues.SeedsecretName)
-			configStr = strings.ReplaceAll(configStr, "${MANAGEMENT_LIF_IP}", tridentValues.ManagementLifIp)
+			configStr = strings.ReplaceAll(configStr, "${MANAGEMENT_LIF_IP}", tridentValues.SvmIpAddresses.ManagementLif)
 			yamlBytes[key] = []byte(configStr)
 			log.Info("Templated backend config", "resource", resource.Name)
 
-		case "trident-svm-secret" :
+		case "trident-svm-secret":
 			key := svmShootSecretFilename
 			secret, ok := yamlBytes[key]
 			if !ok {
@@ -72,7 +74,47 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			secretStr = strings.ReplaceAll(secretStr, "${USER_NAME}", tridentValues.Username)
 			secretStr = strings.ReplaceAll(secretStr, "${PASSWORD}", tridentValues.Password)
 			yamlBytes[key] = []byte(secretStr)
-			log.Info("Templated SVM secret", "resource", resource.Name)			
+			log.Info("Templated SVM secret", "resource", resource.Name)
+
+		case "trident-cwnp":
+			for i, dataip := range tridentValues.SvmIpAddresses.DataLifs {
+				key := cwnpFileName
+				cwnp, ok := yamlBytes[key]
+				if !ok {
+					return fmt.Errorf("secret template file '%s' not found in loaded YAMLs for %s", key, resource.Name)
+				}
+				cwnpString := string(cwnp)
+				cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_CIDR}", dataip)
+				cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_NAME}", fmt.Sprintf("allow-nvme-port-%d", i))
+				cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PRTCL}", "TCP")
+				cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PORT}", "4420")
+				yamlBytes[key] = []byte(cwnpString)
+				log.Info("Templated SVM secret", "resource", resource.Name)
+				err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
+				if err != nil {
+					return err
+				}
+			}
+
+			managementip := tridentValues.SvmIpAddresses.ManagementLif
+			key := cwnpFileName
+			cwnp, ok := yamlBytes[key]
+			if !ok {
+				return fmt.Errorf("secret template file '%s' not found in loaded YAMLs for %s", key, resource.Name)
+			}
+			cwnpString := string(cwnp)
+			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_CIDR}", managementip)
+			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_NAME}", fmt.Sprintf("allow-ontap-mgmt-port"))
+			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PRTCL}", "TCP")
+			cwnpString = strings.ReplaceAll(cwnpString, "${CWNP_PORT}", "443")
+			yamlBytes[key] = []byte(cwnpString)
+			log.Info("Templated SVM secret", "resource", resource.Name)
+			err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
+			if err != nil {
+				return err
+			}
+
+			return nil
 		}
 
 		err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
