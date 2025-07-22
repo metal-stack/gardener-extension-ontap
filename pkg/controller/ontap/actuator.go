@@ -19,7 +19,6 @@ import (
 	"github.com/metal-stack/metal-lib/pkg/tag"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -109,36 +108,15 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 	}
 
 	var (
-		username     []byte
-		password     []byte
-		clusterIp    []byte
-		ok           bool
 		ontapConfigs []ontapclient.Config
 	)
 
 	for _, cluster := range config.Clusters {
 
-		var clusterSecret corev1.Secret
-		err = client.Get(ctx, types.NamespacedName{Name: cluster.AuthSecretRef, Namespace: cluster.AuthSecretNamespace}, &clusterSecret)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth secret: %w", err)
-		}
-
-		if username, ok = clusterSecret.Data["username"]; !ok {
-			return nil, fmt.Errorf("unable to fetch username from secret %s", &clusterSecret)
-		}
-		if password, ok = clusterSecret.Data["password"]; !ok {
-			return nil, fmt.Errorf("unable to fetch password from secret %s", &clusterSecret)
-
-		}
-		if clusterIp, ok = clusterSecret.Data["clusterIp"]; !ok {
-			return nil, fmt.Errorf("unable to fetch clusterip from secret %s", &clusterSecret)
-
-		}
 		clusterClientConfig := ontapclient.Config{
-			AdminUser:     string(username),
-			AdminPassword: string(password),
-			Host:          string(clusterIp),
+			AdminUser:     cluster.Name,
+			AdminPassword: cluster.Password,
+			Host:          cluster.IPAddress,
 			InsecureTLS:   true,
 		}
 
@@ -166,7 +144,7 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 		}
 	}
 
-	return nil, fmt.Errorf("couldn't initalize admin client")
+	return nil, fmt.Errorf("couldn't initialize admin client")
 }
 
 // Reconcile handles extension creation and updates.

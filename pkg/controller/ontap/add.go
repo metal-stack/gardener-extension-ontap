@@ -27,9 +27,9 @@ var (
 		Config: config.ControllerConfiguration{
 			Clusters: []config.Cluster{
 				config.Cluster{
-					Name:                "cluster-A",
-					AuthSecretRef:       "admin-cluster-access-a",
-					AuthSecretNamespace: "garden",
+					Name:     "cluster-A",
+					Username: "admin",
+					Password: "secret",
 				},
 			},
 		},

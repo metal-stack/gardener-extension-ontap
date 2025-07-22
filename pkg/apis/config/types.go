@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -24,16 +25,22 @@ type ControllerConfiguration struct {
 type Cluster struct {
 	// Name of the cluster
 	Name string
-	// AdminAuthSecretRef references to the secret which contains the auth credentials to connect to the cluster management ip for cluster A
-	AuthSecretRef string
-	// AuthSecretNamespace references the seed namespace where the secret is stored to access the cluster management ip for cluster A
-	AuthSecretNamespace string
+	// IPAddress of the cluster
+	IPAddress string
+	// Username is the user to connect to the cluster management ip for cluster A
+	Username string
+	// Password is the admin password to access the cluster management ip for cluster A
+	Password string
 }
 
 func (c *ControllerConfiguration) Validate() error {
 	for _, cluster := range c.Clusters {
-		if cluster.AuthSecretRef == "" || cluster.AuthSecretNamespace == "" {
-			return fmt.Errorf("missing fields in config: cluster=%s, cluster secret namespace=%s, cluster secret ref=%s", cluster, cluster.AuthSecretNamespace, cluster.AuthSecretRef)
+		if cluster.Username == "" || cluster.Password == "" {
+			return fmt.Errorf("missing fields in config: cluster: %s", cluster.Name)
+		}
+
+		if _, err := netip.ParseAddr(cluster.IPAddress); err != nil {
+			return fmt.Errorf("given ipaddress of cluster:%s is malformed %w", cluster.Name, err)
 		}
 	}
 
