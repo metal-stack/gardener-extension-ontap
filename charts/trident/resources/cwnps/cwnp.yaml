@@ -8,5 +8,5 @@ spec:
   - to:
     - cidr: ${CWNP_CIDR}/32
     ports:
-    - protocol: ${CWNP_PRTCL}
+    - protocol: TCP
       port: ${CWNP_PORT}
