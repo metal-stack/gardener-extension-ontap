@@ -9,6 +9,11 @@ import (
 
 	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/go-logr/logr"
+	"github.com/metal-stack/gardener-extension-ontap/charts/trident/resources/cwnps"
+	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -18,15 +23,16 @@ const (
 	storageClassFilename   = "storageclass.yaml"
 	backendConfigFilename  = "backend-config.yaml"
 	svmShootSecretFilename = "svm-shoot-secret.yaml"
+	cwnpFileName           = "cwnp.yaml"
 )
 
 type DeployTridentValues struct {
-	Namespace       string
-	ProjectId       string
-	SeedsecretName  *string
-	ManagementLifIp string
-	Username        string
-	Password        string
+	Namespace      string
+	ProjectId      string
+	SeedsecretName *string
+	SvmIpAddresses ontapv1alpha1.SvmIpaddresses
+	Username       string
+	Password       string
 }
 
 type TridentResource struct {
@@ -55,11 +61,11 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			configStr := string(config)
 			configStr = strings.ReplaceAll(configStr, "${PROJECT_ID}", tridentValues.ProjectId)
 			configStr = strings.ReplaceAll(configStr, "${SECRET_NAME}", *tridentValues.SeedsecretName)
-			configStr = strings.ReplaceAll(configStr, "${MANAGEMENT_LIF_IP}", tridentValues.ManagementLifIp)
+			configStr = strings.ReplaceAll(configStr, "${MANAGEMENT_LIF_IP}", tridentValues.SvmIpAddresses.ManagementLif)
 			yamlBytes[key] = []byte(configStr)
 			log.Info("Templated backend config", "resource", resource.Name)
 
-		case "trident-svm-secret" :
+		case "trident-svm-secret":
 			key := svmShootSecretFilename
 			secret, ok := yamlBytes[key]
 			if !ok {
@@ -72,7 +78,36 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			secretStr = strings.ReplaceAll(secretStr, "${USER_NAME}", tridentValues.Username)
 			secretStr = strings.ReplaceAll(secretStr, "${PASSWORD}", tridentValues.Password)
 			yamlBytes[key] = []byte(secretStr)
-			log.Info("Templated SVM secret", "resource", resource.Name)			
+			log.Info("Templated SVM secret", "resource", resource.Name)
+
+		case "trident-cwnp":
+			var firewallNamespace corev1.Namespace
+			err = k8sClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: "firewall"}}), &firewallNamespace)
+			if err != nil {
+				if errors.IsNotFound(err) {
+					log.Info("firewall ns doesn't exist, not deploying cwnps")
+					break
+				}
+				return err
+			}
+			cwnp := cwnps.CWNP{
+				ManagementLif: tridentValues.SvmIpAddresses.ManagementLif,
+				DataLifs:      tridentValues.SvmIpAddresses.DataLifs,
+			}
+			key := cwnpFileName
+
+			rendered, err := cwnps.ParseCWNP(cwnp)
+			if err != nil {
+				return err
+			}
+
+			yamlBytes[key] = []byte(rendered)
+			log.Info("templated cwnps", "resource", resource.Name)
+			err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
+			if err != nil {
+				return err
+			}
+
 		}
 
 		err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
@@ -101,7 +136,7 @@ func loadYAMLFiles(dirPath string) (map[string][]byte, error) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml") {
+		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml") && !strings.HasSuffix(path, ".tpl") {
 			return nil
 		}
 		relPath, err := filepath.Rel(dirPath, path)
