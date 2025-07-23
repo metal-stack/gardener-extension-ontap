@@ -94,20 +94,19 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 				ManagementLif: tridentValues.SvmIpAddresses.ManagementLif,
 				DataLifs:      tridentValues.SvmIpAddresses.DataLifs,
 			}
-			key := cwnpFileName
-
 			rendered, err := cwnps.ParseCWNP(cwnp)
 			if err != nil {
 				return err
 			}
-
-			yamlBytes[key] = []byte(rendered)
-			log.Info("templated cwnps", "resource", resource.Name)
-			err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
+			resourceToDeploy := map[string][]byte{
+				cwnpFileName: []byte(rendered),
+			}
+			log.Info("templated cwnps", "resource", resource.Name, "input", cwnp, "output", rendered)
+			err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, resourceToDeploy, resource.WaitForHealthy)
 			if err != nil {
 				return err
 			}
-
+			return nil
 		}
 
 		err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)

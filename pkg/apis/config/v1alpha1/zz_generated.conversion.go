@@ -50,8 +50,9 @@ func RegisterConversions(s *runtime.Scheme) error {
 
 func autoConvert_v1alpha1_Cluster_To_config_Cluster(in *Cluster, out *config.Cluster, s conversion.Scope) error {
 	out.Name = in.Name
-	out.AuthSecretRef = in.AuthSecretRef
-	out.AuthSecretNamespace = in.AuthSecretNamespace
+	out.IPAddress = in.IPAddress
+	out.Username = in.Username
+	out.Password = in.Password
 	return nil
 }
 
@@ -62,8 +63,9 @@ func Convert_v1alpha1_Cluster_To_config_Cluster(in *Cluster, out *config.Cluster
 
 func autoConvert_config_Cluster_To_v1alpha1_Cluster(in *config.Cluster, out *Cluster, s conversion.Scope) error {
 	out.Name = in.Name
-	out.AuthSecretRef = in.AuthSecretRef
-	out.AuthSecretNamespace = in.AuthSecretNamespace
+	out.IPAddress = in.IPAddress
+	out.Username = in.Username
+	out.Password = in.Password
 	return nil
 }
 

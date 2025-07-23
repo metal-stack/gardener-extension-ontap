@@ -36,6 +36,11 @@ config:
     contentType: application/json
     qps: 100
     burst: 130
+  clusters: []
+  # - name: cluster-a
+  #   ipaddress: 192.168.0.1
+  #   username: foo
+  #   password: bar
 
 
 gardener:
