@@ -10,6 +10,7 @@ import (
 	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/charts/trident/resources/cwnps"
+	"github.com/metal-stack/gardener-extension-ontap/charts/trident/resources/secrets"
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -66,19 +67,27 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			log.Info("Templated backend config", "resource", resource.Name)
 
 		case "trident-svm-secret":
-			key := svmShootSecretFilename
-			secret, ok := yamlBytes[key]
-			if !ok {
-				return fmt.Errorf("secret template file '%s' not found in loaded YAMLs for %s", key, resource.Name)
+			secretsData := secrets.Secrets{
+				Name:      *tridentValues.SeedsecretName,
+				Namespace: "kube-system",
+				Project:   tridentValues.ProjectId,
+				Username:  tridentValues.Username,
+				Password:  tridentValues.Password,
 			}
-			secretStr := string(secret)
-			secretStr = strings.ReplaceAll(secretStr, "${SECRET_NAME}", *tridentValues.SeedsecretName)
-			secretStr = strings.ReplaceAll(secretStr, "${NAMESPACE}", "kube-system") // not shoot namespace in seed, create this in kube-system ns in shoot
-			secretStr = strings.ReplaceAll(secretStr, "${PROJECT_ID}", tridentValues.ProjectId)
-			secretStr = strings.ReplaceAll(secretStr, "${USER_NAME}", tridentValues.Username)
-			secretStr = strings.ReplaceAll(secretStr, "${PASSWORD}", tridentValues.Password)
-			yamlBytes[key] = []byte(secretStr)
-			log.Info("Templated SVM secret", "resource", resource.Name)
+			rendered, err := secrets.Parse(secretsData)
+			if err != nil {
+				return err
+			}
+			resourceToDeploy := map[string][]byte{
+				svmShootSecretFilename: []byte(rendered),
+			}
+			log.Info("templated secret", "resource", resource.Name, "input", secretsData, "output", rendered)
+			err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, resourceToDeploy, resource.WaitForHealthy)
+			if err != nil {
+				return err
+			}
+			log.Info("templated SVM secret", "resource", resource.Name)
+			return nil
 
 		case "trident-cwnp":
 			var firewallNamespace corev1.Namespace
