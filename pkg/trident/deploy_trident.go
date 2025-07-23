@@ -25,6 +25,34 @@ const (
 	backendConfigFilename  = "backend-config.yaml"
 	svmShootSecretFilename = "svm-shoot-secret.yaml"
 	cwnpFileName           = "cwnp.yaml"
+
+	//Why hardcod
+	tridentCRDsName        string = "trident-crds"
+	tridentInitMR          string = "trident-init"
+	tridentBackendsMR      string = "trident-backends"
+	tridentSvmSecret       string = "trident-svm-secret"
+	tridentCwnp            string = "trident-cwnp"
+	svmSeedSecretNamespace string = "kube-system"
+
+	defaultChartPath = "charts/trident"
+)
+
+var (
+	chartPath       = defaultChartPath
+	resourcesPath   = filepath.Join(chartPath, "resources")
+	tridentInitPath = filepath.Join(resourcesPath, "trident-init")
+	crdPath         = filepath.Join(resourcesPath, "crds")
+	backendPath     = filepath.Join(resourcesPath, "backends")
+	svmSecretsPath  = filepath.Join(resourcesPath, "secrets")
+	cwnpPath        = filepath.Join(resourcesPath, "cwnps")
+
+	tridentResourceToDeploy = []TridentResource{
+		{Name: tridentInitMR, Path: tridentInitPath, WaitForHealthy: false},
+		{Name: tridentCRDsName, Path: crdPath, WaitForHealthy: true},
+		{Name: tridentBackendsMR, Path: backendPath, WaitForHealthy: false},
+		{Name: tridentSvmSecret, Path: svmSecretsPath, WaitForHealthy: false},
+		{Name: tridentCwnp, Path: cwnpPath, WaitForHealthy: false},
+	}
 )
 
 type DeployTridentValues struct {
@@ -43,7 +71,7 @@ type TridentResource struct {
 }
 
 // DeployTrident deploys Trident using the provided values and resources.
-func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client, tridentValues DeployTridentValues, tridentResourceToDeploy []TridentResource) error {
+func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client, tridentValues DeployTridentValues) error {
 	for _, resource := range tridentResourceToDeploy {
 		log.Info("loading YAML files for resource", "resource", resource.Name)
 		yamlBytes, err := loadYAMLFiles(resource.Path)
@@ -53,7 +81,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 
 		// FIXME Will be changed to go template
 		switch resource.Name {
-		case "trident-backends":
+		case tridentBackendsMR:
 			key := backendConfigFilename
 			config, ok := yamlBytes[key]
 			if !ok {
@@ -66,7 +94,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			yamlBytes[key] = []byte(configStr)
 			log.Info("Templated backend config", "resource", resource.Name)
 
-		case "trident-svm-secret":
+		case tridentSvmSecret:
 			secretsData := secrets.Secrets{
 				Name:      *tridentValues.SeedsecretName,
 				Namespace: "kube-system",
@@ -89,7 +117,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			log.Info("templated SVM secret", "resource", resource.Name)
 			return nil
 
-		case "trident-cwnp":
+		case tridentCwnp:
 			var firewallNamespace corev1.Namespace
 			err = k8sClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: "firewall"}}), &firewallNamespace)
 			if err != nil {
