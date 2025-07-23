@@ -133,6 +133,9 @@ func (options *Options) run(ctx context.Context) error {
 	}
 	log.Info("added mgr-scheme to installation")
 
+	ctrlConfig := options.ontapOptions.Completed()
+	ctrlConfig.Apply(&controller.DefaultAddOptions.Config)
+
 	options.controllerOptions.Completed().Apply(&controller.DefaultAddOptions.ControllerOptions)
 	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation, pointer.Pointer(extensionsv1alpha1.ExtensionClassShoot))
 	options.heartbeatOptions.Completed().Apply(&heartbeatcontroller.DefaultAddOptions)

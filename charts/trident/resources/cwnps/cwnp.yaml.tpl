@@ -6,14 +6,14 @@ metadata:
 spec:
   egress:
   - to:
-    cidr: "{{ .ManagementLif }}/32"
+    - cidr: "{{ .ManagementLif }}/32"
     ports:
     - protocol: TCP
       port: 443
-  {{ range .DataLifs -}}
   - to:
-    cidr: "{{ . }}/32"
+    {{ range .DataLifs -}}
+    - cidr: "{{ . }}/32"
+    {{ end -}}
     ports:
     - protocol: TCP
       port: 4420
-  {{ end -}}

@@ -10,7 +10,6 @@ import (
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 
-	"github.com/gardener/gardener/pkg/apis/core/install"
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
@@ -19,8 +18,8 @@ import (
 	"github.com/metal-stack/metal-lib/pkg/tag"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	runtimelog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -64,89 +63,52 @@ var (
 )
 
 type actuator struct {
-	log            logr.Logger
 	ontap          *ontapv1.Ontap
 	client         client.Client
-	svnManager     *trident.SvnManager
 	shootNamespace string
 	decoder        runtime.Decoder
 	config         config.ControllerConfiguration
 }
 
 // NewActuator returns an actuator responsible for Extension resources.
-func NewActuator(log logr.Logger, ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
-	scheme := mgr.GetScheme()
-	install.Install(scheme)
-
-	ontapClient, err := createAdminClient(ctx, mgr, config)
+func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
+	ontapClient, err := createAdminClient(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
-	if ontapClient == nil {
-		return nil, fmt.Errorf("ontapClient is nil")
-	}
-	client := mgr.GetClient()
-
-	svnManager := trident.NewSvmManager(log, ontapClient, client)
 	return &actuator{
-		log:        log,
-		ontap:      ontapClient,
-		client:     client,
-		svnManager: svnManager,
-		decoder:    serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-		config:     config,
+		ontap:   ontapClient,
+		client:  mgr.GetClient(),
+		decoder: serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
+		config:  config,
 	}, nil
-
 }
 
-func createAdminClient(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
-	client := mgr.GetAPIReader()
-	if client == nil {
-		return nil, fmt.Errorf("kubernetes client is not initialized")
-	}
-
+func createAdminClient(ctx context.Context, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
 	err := config.Validate()
 	if err != nil {
 		return nil, err
 	}
 
 	var (
-		username     []byte
-		password     []byte
-		clusterIp    []byte
-		ok           bool
+		log          = runtimelog.Log.WithName(ControllerName)
 		ontapConfigs []ontapclient.Config
 	)
 
 	for _, cluster := range config.Clusters {
-
-		var clusterSecret corev1.Secret
-		err = client.Get(ctx, types.NamespacedName{Name: cluster.AuthSecretRef, Namespace: cluster.AuthSecretNamespace}, &clusterSecret)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth secret: %w", err)
-		}
-
-		if username, ok = clusterSecret.Data["username"]; !ok {
-			return nil, fmt.Errorf("unable to fetch username from secret %s", &clusterSecret)
-		}
-		if password, ok = clusterSecret.Data["password"]; !ok {
-			return nil, fmt.Errorf("unable to fetch password from secret %s", &clusterSecret)
-
-		}
-		if clusterIp, ok = clusterSecret.Data["clusterIp"]; !ok {
-			return nil, fmt.Errorf("unable to fetch clusterip from secret %s", &clusterSecret)
-
-		}
 		clusterClientConfig := ontapclient.Config{
-			AdminUser:     string(username),
-			AdminPassword: string(password),
-			Host:          string(clusterIp),
+			AdminUser:     cluster.Username,
+			AdminPassword: cluster.Password,
+			Host:          cluster.IPAddress,
 			InsecureTLS:   true,
 		}
 
+		log.Info("adding cluster config", "cluster", cluster.Name, "user", cluster.Username, "ip", cluster.IPAddress)
+
 		ontapConfigs = append(ontapConfigs, clusterClientConfig)
 	}
+
 	metroClusterClient, err := ontapclient.NewMetroClusterClient(ontapConfigs)
 	if err != nil {
 		return nil, err
@@ -160,16 +122,17 @@ func createAdminClient(ctx context.Context, mgr manager.Manager, config config.C
 			return nil, err
 		}
 		clusterResponse := cgok.Payload
-		log.Info("Successfully connected to ONTAP cluster from cluster %s with statistics %s.", *clusterResponse.Name, *clusterResponse.Statistics)
+
+		log.Info("Successfully connected to ONTAP cluster", "cluster", *clusterResponse.Name, "statistics", *clusterResponse.Statistics)
+
 		// for now just return the first client
 		// TODO create logic to switch between clients
 		if *clusterResponse.Statistics.Status == "ok" {
 			return &client, nil
-
 		}
 	}
 
-	return nil, fmt.Errorf("couldn't initalize admin client")
+	return nil, fmt.Errorf("couldn't initialize admin client")
 }
 
 // Reconcile handles extension creation and updates.
@@ -184,6 +147,8 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	if _, _, err := a.decoder.Decode(ex.Spec.ProviderConfig.Raw, nil, ontapConfig); err != nil {
 		return fmt.Errorf("failed to decode provider config: %w", err)
 	}
+
+	log.Info("raw provideconfig", "tridentconfig", string(ex.Spec.ProviderConfig.Raw))
 
 	if err := ontapConfig.Validate(); err != nil {
 		return fmt.Errorf("invalid trident config: %w", err)
@@ -202,24 +167,24 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		log.Error(err, "failed to decode shoot, continuing with partial shoot object")
 	}
 
-	a.log.Info("Shoot annotations", "annotations", shoot.Annotations)
+	log.Info("Shoot annotations", "annotations", shoot.Annotations)
 	var projectTag tag.TagMap = shoot.Annotations
 	projectId, ok := projectTag.Value(tag.ClusterProject)
 	if !ok || projectId == "" {
 		return fmt.Errorf("no project ID found in shoot annotations")
 	}
 
-	a.log.Info("Found project ID in shoot annotations", "projectId", projectId)
+	log.Info("Found project ID in shoot annotations", "projectId", projectId)
 	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
 
-	a.log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
-	if err := a.ensureSvmForProject(ctx, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace); err != nil {
+	log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
+	if err := a.ensureSvmForProject(ctx, log, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace); err != nil {
 		return err
 	}
 
 	seedsecretName := fmt.Sprintf(trident.SecretNameFormat, projectId)
-	a.log.Info("Using credentials from secret in shoot cluster", "secretName", seedsecretName, "namespace", "kube-system")
+	log.Info("Using credentials from secret in shoot cluster", "secretName", seedsecretName, "namespace", "kube-system")
 
 	// get existing secret for svm in kube-system namespace
 	existingSecret := &corev1.Secret{}
@@ -236,7 +201,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return fmt.Errorf("password not found in seed secret secretname:%s", seedsecretName)
 	}
 
-	svmIpAdresses := ontapv1alpha1.SvmIpaddresses{
+	svmIpAddresses := ontapv1alpha1.SvmIpaddresses{
 		DataLifs:      ontapConfig.SvmIpaddresses.DataLifs,
 		ManagementLif: ontapConfig.SvmIpaddresses.ManagementLif,
 	}
@@ -245,15 +210,17 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		Namespace:      a.shootNamespace,
 		ProjectId:      projectId,
 		SeedsecretName: &seedsecretName,
-		SvmIpAddresses: svmIpAdresses,
+		SvmIpAddresses: svmIpAddresses,
 		Username:       string(username),
 		Password:       string(password),
 	}
-	err := trident.DeployTrident(ctx, a.log, a.client, tridentValues, tridentResourceToDeploy)
+	err := trident.DeployTrident(ctx, log, a.client, tridentValues, tridentResourceToDeploy)
 	if err != nil {
 		return err
 	}
-	a.log.Info("ONTAP extension reconciliation completed successfully")
+
+	log.Info("ONTAP extension reconciliation completed successfully")
+
 	return nil
 }
 
@@ -297,11 +264,13 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 // ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
-func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
-	_, err := a.svnManager.GetSVMByName(ctx, projectId)
+func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
+	svnManager := trident.NewSvmManager(log, a.ontap, a.client)
+
+	_, err := svnManager.GetSVMByName(ctx, projectId)
 	if err != nil {
 		if errors.Is(err, trident.ErrNotFound) {
-			a.log.Info("SVM not found, proceeding with creation", "projectId", projectId)
+			log.Info("SVM not found, proceeding with creation", "projectId", projectId)
 
 			svmOpts := trident.CreateSVMOptions{
 				ProjectID:              projectId,
@@ -309,16 +278,18 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, SvmIpaddresses ontap
 				SvmSeedSecretNamespace: svmSeedSecretNamespace,
 			}
 
-			if err := a.svnManager.CreateSVM(ctx, svmOpts); err != nil {
+			if err := svnManager.CreateSVM(ctx, svmOpts); err != nil {
 				return fmt.Errorf("failed to ensure SVM for project %s: %w", projectId, err)
 			}
-			a.log.Info("Successfully created SVM", "projectId", projectId)
+			log.Info("Successfully created SVM", "projectId", projectId)
 			return nil
 		}
+
 		// Handle other errors from GetSVMByName
 		return fmt.Errorf("failed to check for existing SVM %s: %w", projectId, err)
 	}
 
-	a.log.Info("SVM already exists, skipping creation", "projectId", projectId)
+	log.Info("SVM already exists, skipping creation", "projectId", projectId)
+
 	return nil
 }

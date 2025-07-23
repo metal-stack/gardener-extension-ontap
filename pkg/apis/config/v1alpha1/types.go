@@ -21,8 +21,10 @@ type ControllerConfiguration struct {
 type Cluster struct {
 	// Name of the cluster
 	Name string `json:"name,omitempty"`
-	// AdminAuthSecretRef references to the secret which contains the auth credentials to connect to the cluster management ip for cluster A
-	AuthSecretRef string `json:"authSecretRef,omitempty"`
-	// AuthSecretNamespace references the seed namespace where the secret is stored to access the cluster management ip for cluster A
-	AuthSecretNamespace string `json:"authSecretNamespace,omitempty"`
+	// IPAddress of the cluster
+	IPAddress string `json:"ipaddress,omitempty"`
+	// Username is the user to connect to the cluster management ip for cluster A
+	Username string `json:"username,omitempty"`
+	// Password is the admin password to access the cluster management ip for cluster A
+	Password string `json:"password,omitempty"`
 }

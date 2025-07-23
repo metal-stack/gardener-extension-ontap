@@ -39,6 +39,10 @@ func (c *TridentConfig) Validate() error {
 		return fmt.Errorf("given management LIF IP %s is not a valid ip address:%w", c.SvmIpaddresses.ManagementLif, err)
 	}
 
+	if len(c.SvmIpaddresses.DataLifs) == 0 {
+		return fmt.Errorf("data LIF IP addresses must be provided")
+	}
+
 	for i, ip := range c.SvmIpaddresses.DataLifs {
 		if ip == "" {
 			return fmt.Errorf("data LIF at index %d cannot be empty", i)

@@ -1,10 +1,12 @@
-package cwnps
+package cwnps_test
 
 import (
 	_ "embed"
+	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/metal-stack/gardener-extension-ontap/charts/trident/resources/cwnps"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -16,17 +18,13 @@ metadata:
 spec:
   egress:
   - to:
-    cidr: "192.168.0.1/32"
+    - cidr: "192.168.0.1/32"
     ports:
     - protocol: TCP
       port: 443
   - to:
-    cidr: "192.168.0.2/32"
-    ports:
-    - protocol: TCP
-      port: 4420
-  - to:
-    cidr: "192.168.0.3/32"
+    - cidr: "192.168.0.2/32"
+    - cidr: "192.168.0.3/32"
     ports:
     - protocol: TCP
       port: 4420
@@ -35,24 +33,28 @@ spec:
 func TestParseCWNP(t *testing.T) {
 	tests := []struct {
 		name    string
-		cwnp    CWNP
+		cwnp    cwnps.CWNP
 		want    string
 		wantErr bool
 	}{
 		{
 			name:    "simple cwnp",
-			cwnp:    CWNP{ManagementLif: "192.168.0.1", DataLifs: []string{"192.168.0.2", "192.168.0.3"}},
+			cwnp:    cwnps.CWNP{ManagementLif: "192.168.0.1", DataLifs: []string{"192.168.0.2", "192.168.0.3"}},
 			want:    expected,
 			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseCWNP(tt.cwnp)
+			got, err := cwnps.ParseCWNP(tt.cwnp)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseCWNP() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+
+			fmt.Printf("got:\n%s\n", got)
+			fmt.Printf("want:\n%s\n", tt.want)
+
 			var (
 				gotRes  = map[string]any{}
 				wantRes = map[string]any{}
