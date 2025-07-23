@@ -148,6 +148,8 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return fmt.Errorf("failed to decode provider config: %w", err)
 	}
 
+	log.Info("raw provideconfig", "tridentconfig", string(ex.Spec.ProviderConfig.Raw))
+
 	if err := ontapConfig.Validate(); err != nil {
 		return fmt.Errorf("invalid trident config: %w", err)
 	}
@@ -199,7 +201,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return fmt.Errorf("password not found in seed secret secretname:%s", seedsecretName)
 	}
 
-	svmIpAdresses := ontapv1alpha1.SvmIpaddresses{
+	svmIpAddresses := ontapv1alpha1.SvmIpaddresses{
 		DataLifs:      ontapConfig.SvmIpaddresses.DataLifs,
 		ManagementLif: ontapConfig.SvmIpaddresses.ManagementLif,
 	}
@@ -208,7 +210,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		Namespace:      a.shootNamespace,
 		ProjectId:      projectId,
 		SeedsecretName: &seedsecretName,
-		SvmIpAddresses: svmIpAdresses,
+		SvmIpAddresses: svmIpAddresses,
 		Username:       string(username),
 		Password:       string(password),
 	}
