@@ -38,6 +38,7 @@ const (
 	tridentInitMR          string = "trident-init"
 	tridentBackendsMR      string = "trident-backends"
 	tridentSvmSecret       string = "trident-svm-secret"
+	tridentCwnp            string = "trident-cwnp"
 	svmSeedSecretNamespace string = "kube-system"
 
 	defaultChartPath = "charts/trident"
@@ -50,12 +51,14 @@ var (
 	crdPath         = filepath.Join(resourcesPath, "crds")
 	backendPath     = filepath.Join(resourcesPath, "backends")
 	svmSecretsPath  = filepath.Join(resourcesPath, "secrets")
+	cwnpPath        = filepath.Join(resourcesPath, "cwnps")
 
 	tridentResourceToDeploy = []trident.TridentResource{
 		{Name: tridentInitMR, Path: tridentInitPath, WaitForHealthy: false},
 		{Name: tridentCRDsName, Path: crdPath, WaitForHealthy: true},
 		{Name: tridentBackendsMR, Path: backendPath, WaitForHealthy: false},
 		{Name: tridentSvmSecret, Path: svmSecretsPath, WaitForHealthy: false},
+		{Name: tridentCwnp, Path: cwnpPath, WaitForHealthy: false},
 	}
 )
 
@@ -196,13 +199,18 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return fmt.Errorf("password not found in seed secret secretname:%s", seedsecretName)
 	}
 
+	svmIpAdresses := ontapv1alpha1.SvmIpaddresses{
+		DataLifs:      ontapConfig.SvmIpaddresses.DataLifs,
+		ManagementLif: ontapConfig.SvmIpaddresses.ManagementLif,
+	}
+
 	tridentValues := trident.DeployTridentValues{
-		Namespace:       a.shootNamespace,
-		ProjectId:       projectId,
-		SeedsecretName:  &seedsecretName,
-		ManagementLifIp: ontapConfig.SvmIpaddresses.ManagementLif,
-		Username:        string(username),
-		Password:        string(password),
+		Namespace:      a.shootNamespace,
+		ProjectId:      projectId,
+		SeedsecretName: &seedsecretName,
+		SvmIpAddresses: svmIpAdresses,
+		Username:       string(username),
+		Password:       string(password),
 	}
 	err := trident.DeployTrident(ctx, log, a.client, tridentValues, tridentResourceToDeploy)
 	if err != nil {
