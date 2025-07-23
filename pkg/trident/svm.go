@@ -13,7 +13,6 @@ import (
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	"github.com/metal-stack/ontap-go/api/client/networking"
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
-	"github.com/metal-stack/ontap-go/api/client/storage"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -79,21 +78,12 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		return fmt.Errorf("failed to get a node for SVM creation: %w", err)
 	}
 
-	// FIXME Throw this out
-	chosenAggregateUUID, err := m.findSuitableAggregateForNode(nodeUUID)
-	if err != nil {
-		return fmt.Errorf("failed to find a suitable aggregate for SVM %s: %w", opts.ProjectID, err)
-	}
-	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID, "aggregateUUID", *chosenAggregateUUID, "nodeUUID", nodeUUID)
+	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID)
 
 	// 3. Create the SVM without network interfaces
 	params := &s_vm.SvmCreateParams{
 		Info: &models.Svm{
 			Name: &opts.ProjectID,
-			//Check if svm creation works without this
-			SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
-				{UUID: chosenAggregateUUID},
-			},
 			Nvme: &models.SvmInlineNvme{
 				Enabled: pointer.Pointer(true),
 				Allowed: pointer.Pointer(true),
@@ -107,7 +97,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		return fmt.Errorf("failed to create SVM %s: %w", opts.ProjectID, err)
 	}
 
-	m.log.Info("SVM created successfully", "name", opts.ProjectID, "aggregateUUID", *chosenAggregateUUID)
+	m.log.Info("SVM created successfully", "name", opts.ProjectID)
 	// 4. Wait for SVM to be ready and get its UUID
 	svmUUID, err := m.waitForSvmReady(ctx, opts.ProjectID)
 	if err != nil {
@@ -158,72 +148,6 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 
 	m.log.Info("Successfully completed SVM creation and setup", "svm", opts.ProjectID)
 	return nil
-}
-
-// findSuitableAggregateForNode fetches all aggregates on a specific node and selects the one
-// with the most available space that isn't a root aggregate
-func (m *SvnManager) findSuitableAggregateForNode(nodeUUID string) (*string, error) {
-	m.log.Info("Finding suitable aggregate on node", "nodeUUID", nodeUUID)
-
-	params := storage.NewAggregateCollectionGetParams()
-	params.SetFields([]string{"uuid", "name", "state", "space", "node"})
-
-	result, err := m.ontapClient.Storage.AggregateCollectionGet(params, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch aggregates: %w", err)
-	}
-
-	if result.Payload == nil || result.Payload.NumRecords == nil || *result.Payload.NumRecords == 0 {
-		return nil, errors.New("no aggregates found in the cluster")
-	}
-
-	var (
-		bestUUID                 *string
-		maxAvailableBlockStorage int64 = -1
-		bestName                 string
-	)
-
-	m.log.Info("Filtering aggregates on node", "nodeUUID", nodeUUID, "totalFound", *result.Payload.NumRecords)
-	for _, record := range result.Payload.AggregateResponseInlineRecords {
-		// Skip if missing essential fields
-		if record.UUID == nil || record.Name == nil || record.State == nil ||
-			record.Space == nil || record.Space.BlockStorage == nil || record.Node == nil {
-			continue
-		}
-
-		// Skip if not on our selected node
-		if record.Node.UUID == nil || *record.Node.UUID != nodeUUID {
-			continue
-		}
-
-		// Skip if not online
-		if *record.State != "online" {
-			m.log.Info("Skipping offline aggregate", "name", *record.Name, "state", *record.State)
-			continue
-		}
-		// We might wanna skip root aggregate too
-
-		// Skip if no availableBlockStorage space info
-		availableBlockStorage := record.Space.BlockStorage.Available
-		if availableBlockStorage == nil || *availableBlockStorage <= 0 {
-			continue
-		}
-
-		// Keep track of the aggregate with the most available space
-		if *availableBlockStorage > maxAvailableBlockStorage {
-			maxAvailableBlockStorage = *availableBlockStorage
-			bestUUID = record.UUID
-			bestName = *record.Name
-			m.log.Info("Found better aggregate", "name", *record.Name, "available", *availableBlockStorage)
-		}
-	}
-
-	if bestUUID == nil {
-		return nil, fmt.Errorf("no suitable aggregates found on node %s", nodeUUID)
-	}
-
-	m.log.Info("Selected aggregate with most available space", "name", bestName, "uuid", *bestUUID, "availableBytes", maxAvailableBlockStorage)
-	return bestUUID, nil
 }
 
 // getFirstNodeInCluster fetches the first node name found in the ONTAP cluster
