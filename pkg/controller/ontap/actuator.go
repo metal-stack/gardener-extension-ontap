@@ -146,6 +146,8 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	log.Info("Found project ID in shoot annotations", "projectId", projectId)
 	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
+	// ontap wants a letter or _ as prefix
+	projectId = "_" + projectId
 
 	svmSeedSecretNamespace := "kube-system"
 

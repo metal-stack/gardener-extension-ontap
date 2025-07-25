@@ -78,9 +78,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		return fmt.Errorf("failed to get a node for SVM creation: %w", err)
 	}
 
-	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID)
-
-	// 3. Create the SVM without network interfaces
+	// 2. Create the SVM without network interfaces
 	params := &s_vm.SvmCreateParams{
 		Info: &models.Svm{
 			Name: &opts.ProjectID,
@@ -98,14 +96,14 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	}
 
 	m.log.Info("SVM created successfully", "name", opts.ProjectID)
-	// 4. Wait for SVM to be ready and get its UUID
+	// 3. Wait for SVM to be ready and get its UUID
 	svmUUID, err := m.waitForSvmReady(ctx, opts.ProjectID)
 	if err != nil {
 		return fmt.Errorf("SVM '%s' was not ready: %w", opts.ProjectID, err)
 	}
 	m.log.Info("SVM is ready", "projectId", opts.ProjectID, "uuid", svmUUID)
 
-	// 5. Create data LIFs
+	// 4. Create data LIFs
 	for i, datalifIp := range opts.SvmIpaddresses.DataLifs {
 		dataLifOpts := networkInterfaceOptions{
 			svmUUID:   svmUUID,
