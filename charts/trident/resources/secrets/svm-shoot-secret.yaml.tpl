@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name:  ${SECRET_NAME}
-  namespace: ${NAMESPACE} 
+  name: "{{ .Name }}"
+  namespace: "{{ .Namespace }}"
   labels:
     app.kubernetes.io/part-of: gardener-extension-ontap
     app.kubernetes.io/managed-by: gardener
-    ontap.metal-stack.io/project-id:  ${PROJECT_ID}
+    ontap.metal-stack.io/project-id: "{{ .Project }}"
 type: Opaque
 stringData:
-  username:  ${USER_NAME}
-  password:  ${PASSWORD}
+  username: "{{ .Username }}"
+  password: "{{ .Password }}"
