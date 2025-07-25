@@ -34,6 +34,10 @@ type Cluster struct {
 }
 
 func (c *ControllerConfiguration) Validate() error {
+	if len(c.Clusters) == 0 {
+		return fmt.Errorf("controller config of clusters is empty")
+	}
+
 	for _, cluster := range c.Clusters {
 		if cluster.Username == "" || cluster.Password == "" {
 			return fmt.Errorf("missing fields in config: cluster: %s", cluster.Name)
