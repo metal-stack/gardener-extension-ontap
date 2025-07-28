@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
@@ -31,36 +30,6 @@ import (
 )
 
 // FIXME here the logic to deploy the trident operator
-
-const (
-	//Why hardcod
-	tridentCRDsName        string = "trident-crds"
-	tridentInitMR          string = "trident-init"
-	tridentBackendsMR      string = "trident-backends"
-	tridentSvmSecret       string = "trident-svm-secret"
-	tridentCwnp            string = "trident-cwnp"
-	svmSeedSecretNamespace string = "kube-system"
-
-	defaultChartPath = "charts/trident"
-)
-
-var (
-	chartPath       = defaultChartPath
-	resourcesPath   = filepath.Join(chartPath, "resources")
-	tridentInitPath = filepath.Join(resourcesPath, "trident-init")
-	crdPath         = filepath.Join(resourcesPath, "crds")
-	backendPath     = filepath.Join(resourcesPath, "backends")
-	svmSecretsPath  = filepath.Join(resourcesPath, "secrets")
-	cwnpPath        = filepath.Join(resourcesPath, "cwnps")
-
-	tridentResourceToDeploy = []trident.TridentResource{
-		{Name: tridentInitMR, Path: tridentInitPath, WaitForHealthy: false},
-		{Name: tridentCRDsName, Path: crdPath, WaitForHealthy: true},
-		{Name: tridentBackendsMR, Path: backendPath, WaitForHealthy: false},
-		{Name: tridentSvmSecret, Path: svmSecretsPath, WaitForHealthy: false},
-		{Name: tridentCwnp, Path: cwnpPath, WaitForHealthy: false},
-	}
-)
 
 type actuator struct {
 	ontap          *ontapv1.Ontap
@@ -177,6 +146,10 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	log.Info("Found project ID in shoot annotations", "projectId", projectId)
 	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
+	// ontap wants a letter or _ as prefix
+	projectId = "p" + projectId
+
+	svmSeedSecretNamespace := "kube-system"
 
 	log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
 	if err := a.ensureSvmForProject(ctx, log, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace); err != nil {
@@ -214,7 +187,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		Username:       string(username),
 		Password:       string(password),
 	}
-	err := trident.DeployTrident(ctx, log, a.client, tridentValues, tridentResourceToDeploy)
+	err := trident.DeployTrident(ctx, log, a.client, tridentValues)
 	if err != nil {
 		return err
 	}
