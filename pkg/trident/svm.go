@@ -13,6 +13,7 @@ import (
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	"github.com/metal-stack/ontap-go/api/client/networking"
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
+	"github.com/metal-stack/ontap-go/api/client/storage"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -78,12 +79,25 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		return fmt.Errorf("failed to get a node for SVM creation: %w", err)
 	}
 
-	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID)
+	// 2. Trident needs a svm assigned, but is not exclusive to that aggregate
+	// Ontap uses all aggregates per default to assign aggregates.
+	agrgp := storage.NewAggregateCollectionGetParamsWithContext(ctx)
+	agrcget, err := m.ontapClient.Storage.AggregateCollectionGet(agrgp, nil)
+	if err != nil {
+		return err
+	}
+	// Just use the first aggregate, root aggregates arent returned in this call
+	aggragetUUID := agrcget.Payload.AggregateResponseInlineRecords[0].UUID
+
+	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID, "aggr", agrcget.Payload.AggregateResponseInlineRecords[0].Name)
 
 	// 3. Create the SVM without network interfaces
 	params := &s_vm.SvmCreateParams{
 		Info: &models.Svm{
 			Name: &opts.ProjectID,
+			SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
+				{UUID: aggragetUUID},
+			},
 			Nvme: &models.SvmInlineNvme{
 				Enabled: pointer.Pointer(true),
 				Allowed: pointer.Pointer(true),

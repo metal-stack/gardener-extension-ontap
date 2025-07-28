@@ -48,7 +48,7 @@ spec:
         env:
         # TODO debug is used here to enforce the swagger client to dump request and response
         - name: DEBUG
-          value: 1
+          value: "1"
         - name: LEADER_ELECTION_NAMESPACE
           valueFrom:
             fieldRef:
