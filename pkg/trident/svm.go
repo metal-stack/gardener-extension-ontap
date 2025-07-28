@@ -206,7 +206,7 @@ func (m *SvnManager) getAllNodesInCluster(ctx context.Context) ([]string, error)
 
 	if len(nodeRecords) < 2 {
 		// we want more than 1 node for metro a metro cluster setup
-		return nil, fmt.Errorf("less than 2 nodes were returned for cluster %s,err: %w", nodeRecords, err)
+		return nil, fmt.Errorf("less than 2 nodes were returned for cluster %v,err: %w", nodeUUIDs, err)
 
 	}
 
