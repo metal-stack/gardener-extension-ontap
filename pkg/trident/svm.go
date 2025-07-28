@@ -83,7 +83,6 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	// Ontap uses all aggregates per default to assign aggregates.
 	agrgp := storage.NewAggregateCollectionGetParamsWithContext(ctx)
 	// Got these from the Swagger UI, i don't think there is another way
-	agrgp.SetFields([]string{"space", "snaplock_type", "state", "block_storage.primary.disk_type"})
 	agrcget, err := m.ontapClient.Storage.AggregateCollectionGet(agrgp, nil)
 	if err != nil {
 		return err
@@ -96,12 +95,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 
 	for _, aggregate := range aggragetRecord {
 		aggrItem := models.SvmInlineAggregatesInlineArrayItem{
-			AvailableSize: aggregate.Space.BlockStorage.Size,
-			Name:          aggregate.Name,
-			SnaplockType:  aggregate.SnaplockType,
-			State:         aggregate.State,
-			Type:          aggregate.BlockStorage.StorageType,
-			UUID:          aggregate.UUID,
+			UUID: aggregate.UUID,
 		}
 		aggrArrayItem = append(aggrArrayItem, &aggrItem)
 
