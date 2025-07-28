@@ -78,6 +78,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 		if err != nil {
 			return err
 		}
+		log.Info("before switch case in deploy trident", "resourcename", resource.Name)
 
 		// FIXME Will be changed to go template
 		switch resource.Name {
@@ -118,6 +119,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			return nil
 
 		case tridentCwnp:
+			log.Info("case trident cwnp inside deploy", "cwnp", tridentCwnp)
 			var firewallNamespace corev1.Namespace
 			err = k8sClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: "firewall"}}), &firewallNamespace)
 			if err != nil {
