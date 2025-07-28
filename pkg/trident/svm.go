@@ -82,6 +82,8 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	// 2. Trident needs a svm assigned, but is not exclusive to that aggregate
 	// Ontap uses all aggregates per default to assign aggregates.
 	agrgp := storage.NewAggregateCollectionGetParamsWithContext(ctx)
+	// Got these from the Swagger UI, i don't think there is another way
+	agrgp.SetFields([]string{"space", "snaplock_type", "state", "block_storage.primary.disk_type"})
 	agrcget, err := m.ontapClient.Storage.AggregateCollectionGet(agrgp, nil)
 	if err != nil {
 		return err
