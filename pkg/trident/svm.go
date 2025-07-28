@@ -86,18 +86,30 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	if err != nil {
 		return err
 	}
-	// Just use the first aggregate, root aggregates arent returned in this call
-	aggragetUUID := agrcget.Payload.AggregateResponseInlineRecords[0].UUID
+	// Use all aggregates
+	aggragetRecord := agrcget.Payload.AggregateResponseInlineRecords
+	var aggrArrayItem []*models.SvmInlineAggregatesInlineArrayItem
 
-	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID, "aggr", agrcget.Payload.AggregateResponseInlineRecords[0].Name)
+	for _, aggregate := range aggragetRecord {
+		aggrItem := models.SvmInlineAggregatesInlineArrayItem{
+			AvailableSize: aggregate.Space.BlockStorage.Size,
+			Name:          aggregate.Name,
+			SnaplockType:  aggregate.SnaplockType,
+			State:         aggregate.State,
+			Type:          aggregate.BlockStorage.StorageType,
+			UUID:          aggregate.UUID,
+		}
+		aggrArrayItem = append(aggrArrayItem, &aggrItem)
+
+	}
+
+	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID, "aggr", aggrArrayItem)
 
 	// 3. Create the SVM without network interfaces
 	params := &s_vm.SvmCreateParams{
 		Info: &models.Svm{
-			Name: &opts.ProjectID,
-			SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
-				{UUID: aggragetUUID},
-			},
+			Name:                &opts.ProjectID,
+			SvmInlineAggregates: aggrArrayItem,
 			Nvme: &models.SvmInlineNvme{
 				Enabled: pointer.Pointer(true),
 				Allowed: pointer.Pointer(true),
