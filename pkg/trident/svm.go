@@ -92,6 +92,8 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	aggragetRecord := agrcget.Payload.AggregateResponseInlineRecords
 	var aggrArrayItem []*models.SvmInlineAggregatesInlineArrayItem
 
+	m.log.Info("aggr collection get return", "agrcg", agrcget.Payload)
+
 	for _, aggregate := range aggragetRecord {
 		aggrItem := models.SvmInlineAggregatesInlineArrayItem{
 			AvailableSize: aggregate.Space.BlockStorage.Size,
