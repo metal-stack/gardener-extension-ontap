@@ -13,6 +13,7 @@ import (
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	"github.com/metal-stack/ontap-go/api/client/networking"
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
+	"github.com/metal-stack/ontap-go/api/client/storage"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -78,12 +79,35 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		return fmt.Errorf("failed to get a node for SVM creation: %w", err)
 	}
 
-	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID)
+	// 2. Trident needs a svm assigned, but is not exclusive to that aggregate
+	// Ontap uses all aggregates per default to assign aggregates.
+	agrgp := storage.NewAggregateCollectionGetParamsWithContext(ctx)
+	// Got these from the Swagger UI, i don't think there is another way
+	agrcget, err := m.ontapClient.Storage.AggregateCollectionGet(agrgp, nil)
+	if err != nil {
+		return err
+	}
+	// Use all aggregates
+	aggragetRecord := agrcget.Payload.AggregateResponseInlineRecords
+	var aggrArrayItem []*models.SvmInlineAggregatesInlineArrayItem
+
+	m.log.Info("aggr collection get return", "agrcg", agrcget.Payload)
+
+	for _, aggregate := range aggragetRecord {
+		aggrItem := models.SvmInlineAggregatesInlineArrayItem{
+			UUID: aggregate.UUID,
+		}
+		aggrArrayItem = append(aggrArrayItem, &aggrItem)
+
+	}
+
+	m.log.Info("Assigning SVM to selected aggregate", "svm", opts.ProjectID, "aggr", aggrArrayItem)
 
 	// 3. Create the SVM without network interfaces
 	params := &s_vm.SvmCreateParams{
 		Info: &models.Svm{
-			Name: &opts.ProjectID,
+			Name:                &opts.ProjectID,
+			SvmInlineAggregates: aggrArrayItem,
 			Nvme: &models.SvmInlineNvme{
 				Enabled: pointer.Pointer(true),
 				Allowed: pointer.Pointer(true),
@@ -98,14 +122,14 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	}
 
 	m.log.Info("SVM created successfully", "name", opts.ProjectID)
-	// 4. Wait for SVM to be ready and get its UUID
+	// 3. Wait for SVM to be ready and get its UUID
 	svmUUID, err := m.waitForSvmReady(ctx, opts.ProjectID)
 	if err != nil {
 		return fmt.Errorf("SVM '%s' was not ready: %w", opts.ProjectID, err)
 	}
 	m.log.Info("SVM is ready", "projectId", opts.ProjectID, "uuid", svmUUID)
 
-	// 5. Create data LIFs
+	// 4. Create data LIFs
 	for i, datalifIp := range opts.SvmIpaddresses.DataLifs {
 		selectedNodeUUID := nodesUUIDs[i%len(nodesUUIDs)]
 		dataLifOpts := networkInterfaceOptions{
