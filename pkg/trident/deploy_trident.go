@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
@@ -158,6 +159,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 }
 
 func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.Client, ex *extensionsv1alpha1.Extension) error {
+	slices.Reverse(tridentResources)
 	for _, resource := range tridentResources {
 		if err := managedresources.Delete(ctx, client, ex.Namespace, resource.Name, false); err != nil {
 			log.Error(err, "unable to delete managedresource", "resource", resource.Name)
@@ -167,7 +169,7 @@ func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.
 			log.Error(err, "unable to wait for managedresource to be deleted", "resource", resource.Name)
 			return err
 		}
-		log.Info("ManagedResource for Trident operator successfully deleted.")
+		log.Info("managedresource deleted successfully", "resource", resource.Name)
 	}
 
 	log.Info("all managed resources successfully deleted.")
