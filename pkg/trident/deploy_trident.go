@@ -159,8 +159,11 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 }
 
 func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.Client, ex *extensionsv1alpha1.Extension) error {
-	slices.Reverse(tridentResources)
-	for _, resource := range tridentResources {
+	resources := slices.Clone(tridentResources)
+
+	slices.Reverse(resources)
+
+	for _, resource := range resources {
 		if err := managedresources.Delete(ctx, client, ex.Namespace, resource.Name, false); err != nil {
 			log.Error(err, "unable to delete managedresource", "resource", resource.Name)
 			return err
@@ -173,6 +176,7 @@ func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.
 	}
 
 	log.Info("all managed resources successfully deleted.")
+
 	return nil
 }
 
