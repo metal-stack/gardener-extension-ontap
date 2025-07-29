@@ -168,10 +168,6 @@ func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.
 			log.Error(err, "unable to delete managedresource", "resource", resource.Name)
 			return err
 		}
-		if err := managedresources.WaitUntilDeleted(ctx, client, ex.Namespace, resource.Name); err != nil {
-			log.Error(err, "unable to wait for managedresource to be deleted", "resource", resource.Name)
-			return err
-		}
 		log.Info("managedresource deleted successfully", "resource", resource.Name)
 	}
 
