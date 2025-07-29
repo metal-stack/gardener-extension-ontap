@@ -199,26 +199,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 // Delete the Extension resource.
 func (a *actuator) Delete(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentBackendsMR, false); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentBackendsMR); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentInitMR, false); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentInitMR); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentCRDsName, false); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentCRDsName); err != nil {
-	// 	return err
-	// }
-	// log.Info("ManagedResource for Trident operator successfully deleted.")
-	return nil
+	return trident.DeleteManagedResources(ctx, log, a.client, ex)
 }
 
 // ForceDelete the Extension resource

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
+
 	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/charts/trident/resources/cwnps"
@@ -46,7 +48,7 @@ var (
 	svmSecretsPath  = filepath.Join(resourcesPath, "secrets")
 	cwnpPath        = filepath.Join(resourcesPath, "cwnps")
 
-	tridentResourceToDeploy = []TridentResource{
+	tridentResources = []TridentResource{
 		{Name: tridentInitMR, Path: tridentInitPath, WaitForHealthy: false},
 		{Name: tridentCRDsName, Path: crdPath, WaitForHealthy: true},
 		{Name: tridentBackendsMR, Path: backendPath, WaitForHealthy: false},
@@ -72,7 +74,7 @@ type TridentResource struct {
 
 // DeployTrident deploys Trident using the provided values and resources.
 func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client, tridentValues DeployTridentValues) error {
-	for _, resource := range tridentResourceToDeploy {
+	for _, resource := range tridentResources {
 		log.Info("loading YAML files for resource", "resource", resource.Name)
 		yamlBytes, err := loadYAMLFiles(resource.Path)
 		if err != nil {
@@ -152,6 +154,23 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			return err
 		}
 	}
+	return nil
+}
+
+func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.Client, ex *extensionsv1alpha1.Extension) error {
+	for _, resource := range tridentResources {
+		if err := managedresources.Delete(ctx, client, ex.Namespace, resource.Name, false); err != nil {
+			log.Error(err, "unable to delete managedresource", "resource", resource.Name)
+			return err
+		}
+		if err := managedresources.WaitUntilDeleted(ctx, client, ex.Namespace, resource.Name); err != nil {
+			log.Error(err, "unable to wait for managedresource to be deleted", "resource", resource.Name)
+			return err
+		}
+		log.Info("ManagedResource for Trident operator successfully deleted.")
+	}
+
+	log.Info("all managed resources successfully deleted.")
 	return nil
 }
 
