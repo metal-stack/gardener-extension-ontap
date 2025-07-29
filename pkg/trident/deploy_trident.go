@@ -115,7 +115,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			if err != nil {
 				return err
 			}
-			log.Info("templated SVM secret", "resource", resource.Name)
+			continue
 
 		case tridentCwnp:
 			log.Info("case trident cwnp inside deploy", "cwnp", tridentCwnp)
@@ -144,7 +144,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			if err != nil {
 				return err
 			}
-			return nil
+			continue
 		}
 
 		err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)

@@ -74,7 +74,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLifs", opts.SvmIpaddresses.DataLifs)
 
 	// 1. Get a node for network interface placement and aggregate selection
-	nodeUUID, err := m.getFirstNodeInCluster(ctx)
+	nodesUUIDs, err := m.getAllNodesInCluster(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get a node for SVM creation: %w", err)
 	}
@@ -131,13 +131,14 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 
 	// 4. Create data LIFs
 	for i, datalifIp := range opts.SvmIpaddresses.DataLifs {
+		selectedNodeUUID := nodesUUIDs[i%len(nodesUUIDs)]
 		dataLifOpts := networkInterfaceOptions{
 			svmUUID:   svmUUID,
 			svmName:   opts.ProjectID,
 			ipAddress: datalifIp,
 			lifName:   fmt.Sprintf("%s+%d", dataLifTag, i),
 			// TODO:needs to be adjusted so ips are created distributed on both nodes, PR is open for this already
-			nodeUUID:  nodeUUID,
+			nodeUUID:  selectedNodeUUID,
 			isDataLif: true,
 		}
 		if err := m.createNetworkInterfaceForSvm(ctx, dataLifOpts); err != nil {
@@ -151,7 +152,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		svmName:   opts.ProjectID,
 		ipAddress: opts.SvmIpaddresses.ManagementLif,
 		lifName:   managementLifTag,
-		nodeUUID:  nodeUUID,
+		nodeUUID:  nodesUUIDs[0],
 		isDataLif: false,
 	}
 	if err := m.createNetworkInterfaceForSvm(ctx, mgmtLifOpts); err != nil {
@@ -174,32 +175,42 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	return nil
 }
 
-// getFirstNodeInCluster fetches the first node name found in the ONTAP cluster
+// getAllNodesInCluster fetches the first node name found in the ONTAP cluster
 // Needs to be changed, waiting for Netapp answer
-func (m *SvnManager) getFirstNodeInCluster(ctx context.Context) (string, error) {
+func (m *SvnManager) getAllNodesInCluster(ctx context.Context) ([]string, error) {
 	m.log.Info("Fetching first available node in cluster...")
 
+	var nodeUUIDs []string
 	params := cluster.NewNodesGetParamsWithContext(ctx)
 	params.SetFields([]string{"uuid", "name"})
 
 	result, err := m.ontapClient.Cluster.NodesGet(params, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch nodes: %w", err)
+		return nil, fmt.Errorf("failed to fetch nodes: %w", err)
 	}
 	for _, node := range result.Payload.NodeResponseInlineRecords {
 		m.log.Info("Node in Response", "nodes", node)
 	}
 
 	if result.Payload == nil {
-		return "", errors.New("no node information returned")
+		return nil, errors.New("no node information returned")
 	}
 
 	if len(result.Payload.NodeResponseInlineRecords) == 0 {
-		return "", fmt.Errorf("nodeResponseInlineRecords is empty")
+		return nil, fmt.Errorf("nodeResponseInlineRecords is empty")
 	}
-	nodeUUID := *result.Payload.NodeResponseInlineRecords[0].UUID
+	nodeRecords := result.Payload.NodeResponseInlineRecords
+	for _, node := range nodeRecords {
+		nodeUUIDs = append(nodeUUIDs, node.UUID.String())
+	}
 
-	return nodeUUID.String(), nil
+	if len(nodeRecords) < 2 {
+		// we want more than 1 node for metro a metro cluster setup
+		return nil, fmt.Errorf("less than 2 nodes were returned for cluster %v,err: %w", nodeUUIDs, err)
+
+	}
+
+	return nodeUUIDs, nil
 }
 
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
