@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gardener/gardener/extensions/pkg/controller"
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	"github.com/gardener/gardener/extensions/pkg/util"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
@@ -140,7 +139,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 	namespace := ex.GetNamespace()
 
-	cluster, err := controller.GetCluster(ctx, a.client, namespace)
+	cluster, err := extensionscontroller.GetCluster(ctx, a.client, namespace)
 	if err != nil {
 		return err
 	}
