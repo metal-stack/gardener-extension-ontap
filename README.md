@@ -241,6 +241,8 @@ parameters:
   csi.storage.k8s.io/node-stage-secret-namespace: kube-system
   backendType: "ontap-san"
   provisioningType: "thick"
+allowVolumeExpansion: true
+
 ```
 
 ## 3. PVC Using the Encrypted StorageClass
