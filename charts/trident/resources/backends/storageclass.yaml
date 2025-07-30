@@ -7,3 +7,4 @@ parameters:
   backendType: "ontap-san"
   provisioningType: "thick"
   selector: "luks=false"
+allowVolumeExpansion: true
