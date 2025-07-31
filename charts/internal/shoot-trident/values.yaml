@@ -1,0 +1,13 @@
+---
+images:
+  trident-operator: netapp/trident-operator:25.02.0
+  busybox: busybox:1.36
+
+projectID: p1234
+managementLifIP: 1.2.3.4
+dataLifs:
+  - 2.3.4.5
+  - 2.3.4.6
+
+username: user
+password: pass

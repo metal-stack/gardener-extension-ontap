@@ -1,0 +1,24 @@
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: ontap-{{ .Values.projectID }}-backend
+  namespace: kube-system
+spec:
+  version: 1
+  backendName: ontap-{{ .Values.projectID }}
+  storageDriverName: ontap-san
+  sanType: nvme
+  managementLIF: {{ .Values.managementLifIP }}
+  svm: {{ .Values.projectID }}
+  credentials:
+    name: ontap-svm-{{ .Values.projectID }}-credentials
+  storage:
+  - labels:
+      luks: "true"
+    defaults:
+      luksEncryption: "true"
+  - labels:
+      luks: "false"
+    defaults:
+      luksEncryption: "false"
