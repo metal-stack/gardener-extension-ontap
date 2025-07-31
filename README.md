@@ -243,7 +243,7 @@ parameters:
   csi.storage.k8s.io/node-stage-secret-name: storage-encryption-key
   csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
   backendType: "ontap-san"
-  provisioningType: "thick"
+  provisioningType: "thin"
 allowVolumeExpansion: true
 
 ```
@@ -253,6 +253,8 @@ allowVolumeExpansion: true
 ```yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
+metadata:
+  name: ontap-encrypted-volume
 spec:
   storageClassName: ontap-encrypted
   accessModes:
