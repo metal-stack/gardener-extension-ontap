@@ -322,7 +322,10 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 		if err != nil {
 			if k8serrors.IsNotFound(err) {
 				m.log.Info("seed secret does not exist even tho svm exists, changing password of svm and creating seed secret")
-				m.CreateMissingSeedSecret(ctx, svmName, m.ontapClient)
+				err = m.CreateMissingSeedSecret(ctx, svmName, m.ontapClient)
+				if err != nil {
+					return nil, err
+				}
 			}
 			return nil, err
 		}
