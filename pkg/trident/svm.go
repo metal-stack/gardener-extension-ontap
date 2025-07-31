@@ -283,9 +283,6 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 
 // Returns a svm by inputting the svmName, i.e. projectId
 func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string, error) {
-
-	var svmUUID *string
-
 	if m.ontapClient == nil || m.ontapClient.SVM == nil {
 		return nil, fmt.Errorf("API client or SVM service is not initialized")
 	}
@@ -297,7 +294,6 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 	}
 
 	m.log.Info("Checking for SVM with name", "name", svmName)
-
 	if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
 		m.log.Info("No SVMs found in the response")
 		return nil, ErrSvmNotFound
@@ -307,27 +303,27 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 		if svm.Name != nil && *svm.Name == svmName {
 			if svm.UUID != nil {
 				m.log.Info("Found SVM", "name", svmName, "uuid", *svm.UUID)
-				svmUUID = svm.UUID
-			}
-			return nil, ErrSvmNotFound
-		}
-	}
 
-	if svmUUID != nil {
-		// check for the seed secret, if its not there create it here, because the svm already exists but seed secret is missing
-		// this can only happen on the first shoot of the project
-		// if this happens on the second shoot or n shoot, something is really broken
-		secretName := fmt.Sprintf("ontap-svm-%s-credentials", svmName)
-		err = m.seedClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Secret{ObjectMeta: v1.ObjectMeta{Name: secretName, Namespace: "kube-system"}}), nil)
-		if err != nil {
-			if k8serrors.IsNotFound(err) {
-				m.log.Info("seed secret does not exist even tho svm exists, changing password of svm and creating seed secret")
-				err = m.CreateMissingSeedSecret(ctx, svmName, m.ontapClient)
+				// Check for the seed secret, if it's not there create it here, because the svm already exists but seed secret is missing
+				// This can only happen on the first shoot of the project
+				// If this happens on the second shoot or n shoot, something is really broken
+				secretName := fmt.Sprintf("ontap-svm-%s-credentials", svmName)
+				err = m.seedClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Secret{ObjectMeta: v1.ObjectMeta{Name: secretName, Namespace: "kube-system"}}), nil)
 				if err != nil {
-					return nil, err
+					if k8serrors.IsNotFound(err) {
+						m.log.Info("seed secret does not exist even tho svm exists, changing password of svm and creating seed secret")
+						err = m.CreateMissingSeedSecret(ctx, svmName, m.ontapClient)
+						if err != nil {
+							return nil, err
+						}
+					} else {
+						return nil, err
+					}
 				}
+
+				// Return the UUID when SVM is found
+				return svm.UUID, nil
 			}
-			return nil, err
 		}
 	}
 
