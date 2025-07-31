@@ -211,44 +211,52 @@ spec:
 - Add monitoring and alerting for SVM health
 - Create proper cleanup and lifecycle management
 
-# Creating ONTAP Encrypted Volumes
+## Creating ONTAP Encrypted Volumes
 
 To create an encrypted volume using NetApp Trident CSI, you need three components:
 
-## 1. Secret with LUKS Passphrase
+1. Secret with LUKS Passphrase
+
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: luks-pvc1
-  namespace: kube-system
+  name: storage-encryption-key
+  namespace: <namespace-of-the-pvc>
 stringData:
   luks-passphrase-name: A
   luks-passphrase: secretA
 ```
 
-## 2. StorageClass with Encryption Annotations
+2. StorageClass with Encryption Annotations
+
 The StorageClass must include CSI node stage secret annotations:
+
 ```yaml
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: luks
+  name: ontap-encrypted
 provisioner: csi.trident.netapp.io
 parameters:
   selector: "luks=true"
-  csi.storage.k8s.io/node-stage-secret-name: luks-pvc1
-  csi.storage.k8s.io/node-stage-secret-namespace: kube-system
+  csi.storage.k8s.io/node-stage-secret-name: storage-encryption-key
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
   backendType: "ontap-san"
-  provisioningType: "thick"
+  provisioningType: "thin"
+allowVolumeExpansion: true
+
 ```
 
-## 3. PVC Using the Encrypted StorageClass
+3. PVC Using the Encrypted StorageClass
+
 ```yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
+metadata:
+  name: ontap-encrypted-volume
 spec:
-  storageClassName: luks
+  storageClassName: ontap-encrypted
   accessModes:
     - ReadWriteOnce
   resources:
@@ -256,7 +264,8 @@ spec:
       storage: 1Gi
 ```
 
-## Key Requirements
+### Key Requirements
+
 - Secret name in StorageClass must match actual secret name
 - Secret namespace in StorageClass must match where secret is created
 - PVC must reference the StorageClass with encryption annotations
