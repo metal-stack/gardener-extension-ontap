@@ -24,8 +24,8 @@ import (
 )
 
 var (
-	// ErrNotFound is returned if the svm was not found
-	ErrNotFound = errors.New("NotFound")
+	// ErrSvmNotFound is returned if the svm was not found
+	ErrSvmNotFound = errors.New("NotFound")
 	// ErrAlreadyExists is returned when the entity already exists
 	ErrAlreadyExists = errors.New("AlreadyExists")
 
@@ -300,7 +300,7 @@ func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 
 	if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
 		m.log.Info("No SVMs found in the response")
-		return nil, ErrNotFound
+		return nil, ErrSvmNotFound
 	}
 
 	for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
@@ -309,7 +309,7 @@ func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 				m.log.Info("Found SVM", "name", svmName, "uuid", *svm.UUID)
 				svmUUID = svm.UUID
 			}
-			return nil, ErrNotFound
+			return nil, ErrSvmNotFound
 		}
 	}
 
@@ -329,7 +329,7 @@ func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 	}
 
 	m.log.Info("SVM not found", "name", svmName)
-	return nil, ErrNotFound
+	return nil, ErrSvmNotFound
 }
 
 // waitForSvmReady polls until the SVM exists and is in a "running" state.
@@ -340,7 +340,7 @@ func (m *SvnManager) waitForSvmReady(ctx context.Context, svmName string) (strin
 	err := retry.Do(func() error {
 		svmUUID, err := m.GetSVMByName(ctx, svmName)
 		if err != nil {
-			if errors.Is(err, ErrNotFound) {
+			if errors.Is(err, ErrSvmNotFound) {
 				m.log.Info("SVM not found by name yet, retrying...", "svmName", svmName)
 				return err
 			}
