@@ -192,7 +192,6 @@ func buildSecret(secretName, userName, password, projectId string) *corev1.Secre
 
 func (m *SvmManager) CreateMissingSeedSecret(ctx context.Context, svmName string, ontapclient *ontapv1.Ontap) error {
 	// The ontap api doesn't have a way of getting password for users, therefore we update the password and create the seed secret with the updated password
-
 	password, err := generateSecurePassword()
 	if err != nil {
 		return err
