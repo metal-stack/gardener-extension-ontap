@@ -51,7 +51,7 @@ type ontapUserOptions struct {
 }
 
 // CreateUserAndSecret creates an svm scoped account set to vsadmin role.
-func (m *SvnManager) CreateUserAndSecret(ctx context.Context, opts userAndSecretOptions) error {
+func (m *SvmManager) CreateUserAndSecret(ctx context.Context, opts userAndSecretOptions) error {
 	m.log.Info("Creating user for SVM", "svm", opts.projectID)
 	secretName := fmt.Sprintf(SecretNameFormat, opts.projectID)
 	// Create or update user with the vsadmin role
@@ -80,7 +80,7 @@ func (m *SvnManager) CreateUserAndSecret(ctx context.Context, opts userAndSecret
 }
 
 // createONTAPUserForSVM checks if the user exists on ONTAP first, then potentially creates it.
-func (m *SvnManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOptions) (string, error) {
+func (m *SvmManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOptions) (string, error) {
 
 	m.log.Info("Ensuring ONTAP user for SVM", "username", opts.username, "svm", opts.svmName)
 
@@ -136,7 +136,7 @@ func (m *SvnManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOp
 	return password, ErrSeedSecretMissing
 }
 
-func (m *SvnManager) checkIfAccountExistsForSvm(ctx context.Context, svmName string, kubeSeedSecret string) (string, error) {
+func (m *SvmManager) checkIfAccountExistsForSvm(ctx context.Context, svmName string, kubeSeedSecret string) (string, error) {
 	// Check if secret exists in the kube-system namespace in seed
 	secretName := fmt.Sprintf(SecretNameFormat, svmName)
 	existingSecret := &corev1.Secret{}
@@ -190,7 +190,7 @@ func buildSecret(secretName, userName, password, projectId string) *corev1.Secre
 	}
 }
 
-func (m *SvnManager) CreateMissingSeedSecret(ctx context.Context, svmName string, ontapclient *ontapv1.Ontap) error {
+func (m *SvmManager) CreateMissingSeedSecret(ctx context.Context, svmName string, ontapclient *ontapv1.Ontap) error {
 	// The ontap api doesn't have a way of getting password for users, therefore we update the password and create the seed secret with the updated password
 
 	password, err := generateSecurePassword()
@@ -216,7 +216,7 @@ func (m *SvnManager) CreateMissingSeedSecret(ctx context.Context, svmName string
 	return nil
 }
 
-func (m *SvnManager) buildAndCreateSecretInSeed(ctx context.Context, secretName, userName, password, projectId string) error {
+func (m *SvmManager) buildAndCreateSecretInSeed(ctx context.Context, secretName, userName, password, projectId string) error {
 	tridentSecret := buildSecret(secretName, defaultSVMUsername, password, projectId)
 	// make this use of managedResource aswell, otherwise seed secret can be deleted
 	if err := m.seedClient.Create(ctx, tridentSecret); err != nil {

@@ -58,14 +58,14 @@ type networkInterfaceOptions struct {
 	isDataLif bool
 }
 
-type SvnManager struct {
+type SvmManager struct {
 	log         logr.Logger
 	ontapClient *ontapv1.Ontap
 	seedClient  client.Client
 }
 
-func NewSvmManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient client.Client) *SvnManager {
-	return &SvnManager{
+func NewSvmManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient client.Client) *SvmManager {
+	return &SvmManager{
 		log:         log,
 		ontapClient: ontapClient,
 		seedClient:  seedClient,
@@ -73,7 +73,7 @@ func NewSvmManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient clien
 }
 
 // CreateSVM creates an SVM and sets up network interfaces on a selected node
-func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error {
+func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error {
 	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLifs", opts.SvmIpaddresses.DataLifs)
 
 	// 1. Get a node for network interface placement and aggregate selection
@@ -180,7 +180,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 
 // getAllNodesInCluster fetches the first node name found in the ONTAP cluster
 // Needs to be changed, waiting for Netapp answer
-func (m *SvnManager) getAllNodesInCluster(ctx context.Context) ([]string, error) {
+func (m *SvmManager) getAllNodesInCluster(ctx context.Context) ([]string, error) {
 	m.log.Info("Fetching first available node in cluster...")
 
 	var nodeUUIDs []string
@@ -217,7 +217,7 @@ func (m *SvnManager) getAllNodesInCluster(ctx context.Context) ([]string, error)
 }
 
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
-func (m *SvnManager) createNetworkInterfaceForSvm(ctx context.Context, opts networkInterfaceOptions) error {
+func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts networkInterfaceOptions) error {
 
 	m.log.Info("Creating network interface", "svm", opts.svmName, "lifName", opts.lifName, "ip", opts.ipAddress, "node", opts.nodeUUID)
 
@@ -282,7 +282,7 @@ func (m *SvnManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 }
 
 // Returns a svm by inputting the svmName, i.e. projectId
-func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (*string, error) {
+func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string, error) {
 
 	var svmUUID *string
 
@@ -333,7 +333,7 @@ func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 }
 
 // waitForSvmReady polls until the SVM exists and is in a "running" state.
-func (m *SvnManager) waitForSvmReady(ctx context.Context, svmName string) (string, error) {
+func (m *SvmManager) waitForSvmReady(ctx context.Context, svmName string) (string, error) {
 	m.log.Info("waiting for SVM to be ready", "svmName", svmName)
 
 	var uuid string
