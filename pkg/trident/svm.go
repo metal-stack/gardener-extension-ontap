@@ -321,7 +321,7 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 					}
 				}
 
-				// Return the UUID when SVM is found
+				// Return the UUID when SVM is found and seed secret exists
 				return svm.UUID, nil
 			}
 		}
