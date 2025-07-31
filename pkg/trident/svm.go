@@ -282,25 +282,25 @@ func (m *SvnManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 }
 
 // Returns a svm by inputting the svmName, i.e. projectId
-func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (string, error) {
+func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (*string, error) {
 
 	var svmUUID *string
 
 	if m.ontapClient == nil || m.ontapClient.SVM == nil {
-		return "", fmt.Errorf("API client or SVM service is not initialized")
+		return nil, fmt.Errorf("API client or SVM service is not initialized")
 	}
 
 	params := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
 	svmGetOK, err := m.ontapClient.SVM.SvmCollectionGet(params, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch SVMs: %w", err)
+		return nil, fmt.Errorf("failed to fetch SVMs: %w", err)
 	}
 
 	m.log.Info("Checking for SVM with name", "name", svmName)
 
 	if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
 		m.log.Info("No SVMs found in the response")
-		return "", ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
@@ -309,7 +309,7 @@ func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (string, 
 				m.log.Info("Found SVM", "name", svmName, "uuid", *svm.UUID)
 				svmUUID = svm.UUID
 			}
-			return "", ErrNotFound
+			return nil, ErrNotFound
 		}
 	}
 
@@ -324,12 +324,12 @@ func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (string, 
 				m.log.Info("seed secret does not exist even tho svm exists, changing password of svm and creating seed secret")
 				m.CreateMissingSeedSecret(ctx, svmName, m.ontapClient)
 			}
-			return "", err
+			return nil, err
 		}
 	}
 
 	m.log.Info("SVM not found", "name", svmName)
-	return "", ErrNotFound
+	return nil, ErrNotFound
 }
 
 // waitForSvmReady polls until the SVM exists and is in a "running" state.
@@ -349,7 +349,7 @@ func (m *SvnManager) waitForSvmReady(ctx context.Context, svmName string) (strin
 		}
 
 		getParams := s_vm.NewSvmGetParamsWithContext(ctx)
-		getParams.SetUUID(svmUUID)
+		getParams.SetUUID(*svmUUID)
 
 		svmInfo, err := m.ontapClient.SVM.SvmGet(getParams, nil)
 		if err != nil {
@@ -371,7 +371,7 @@ func (m *SvnManager) waitForSvmReady(ctx context.Context, svmName string) (strin
 
 		if svmInfo.Payload.Nvme != nil && svmInfo.Payload.Nvme.Enabled != nil && *svmInfo.Payload.Nvme.Enabled {
 			m.log.Info("SVM is ready and NVMe is enabled", "svmName", svmName, "uuid", svmUUID, "state", currentState)
-			uuid = svmUUID
+			uuid = *svmUUID
 			return nil
 		}
 
