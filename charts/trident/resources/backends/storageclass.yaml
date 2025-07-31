@@ -6,7 +6,7 @@ metadata:
 provisioner: csi.trident.netapp.io
 parameters:
   backendType: "ontap-san"
-  provisioningType: "thick"
+  provisioningType: "thin"
   selector: "luks=false"
 allowVolumeExpansion: true
 
@@ -18,7 +18,7 @@ metadata:
 provisioner: csi.trident.netapp.io
 parameters:
   backendType: "ontap-san"
-  provisioningType: "thick"
+  provisioningType: "thin"
   selector: "luks=true"
   csi.storage.k8s.io/node-stage-secret-name: storage-encryption-key
   csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
