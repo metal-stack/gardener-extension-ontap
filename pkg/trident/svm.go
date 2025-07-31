@@ -15,6 +15,9 @@ import (
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	"github.com/metal-stack/ontap-go/api/client/storage"
 	"github.com/metal-stack/ontap-go/api/models"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
@@ -281,6 +284,8 @@ func (m *SvnManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 // Returns a svm by inputting the svmName, i.e. projectId
 func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (string, error) {
 
+	var svmUUID *string
+
 	if m.ontapClient == nil || m.ontapClient.SVM == nil {
 		return "", fmt.Errorf("API client or SVM service is not initialized")
 	}
@@ -302,9 +307,24 @@ func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (string, 
 		if svm.Name != nil && *svm.Name == svmName {
 			if svm.UUID != nil {
 				m.log.Info("Found SVM", "name", svmName, "uuid", *svm.UUID)
-				return *svm.UUID, nil
+				svmUUID = svm.UUID
 			}
 			return "", ErrNotFound
+		}
+	}
+
+	if svmUUID != nil {
+		// check for the seed secret, if its not there create it here, because the svm already exists but seed secret is missing
+		// this can only happen on the first shoot of the project
+		// if this happens on the second shoot or n shoot, something is really broken
+		secretName := fmt.Sprintf("ontap-svm-%s-credentials", svmName)
+		err = m.seedClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Secret{ObjectMeta: v1.ObjectMeta{Name: secretName, Namespace: "kube-system"}}), nil)
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				m.log.Info("seed secret does not exist even tho svm exists, changing password of svm and creating seed secret")
+				m.CreateMissingSeedSecret(ctx, svmName, m.ontapClient)
+			}
+			return "", err
 		}
 	}
 
