@@ -207,13 +207,13 @@ func (m *SvmManager) CreateMissingSeedSecret(ctx context.Context, svmName string
 	}
 	_, err = ontapclient.Security.AccountPasswordCreate(secparams, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to create password for project %s on ontap:%w", svmName, err)
 	}
 
 	secretName := fmt.Sprintf(SecretNameFormat, svmName)
 	err = m.buildAndCreateSecretInSeed(ctx, secretName, defaultSVMUsername, password, svmName)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to create secret %s in seed %w", secretName, err)
 	}
 
 	return nil
