@@ -160,9 +160,9 @@ func (m *SvmManager) checkIfAccountExistsForSvm(ctx context.Context, svmName str
 }
 
 func generateSecurePassword() (string, error) {
-	// Generate a password that is 8 characters long with 2 digits, 2 symbols,
+	// Generate a password that is 8 characters long with 2 digits, 0 symbols,
 	// allowing upper and lower case letters, disallowing repeat characters.
-	res, err := password.Generate(8, 2, 2, false, false)
+	res, err := password.Generate(8, 2, 0, false, false)
 	if err != nil {
 		return "", fmt.Errorf("unable to create a random password:%w", err)
 	}
@@ -198,9 +198,13 @@ func (m *SvmManager) CreateMissingSeedSecret(ctx context.Context, svmName string
 	}
 
 	secparams := security.NewAccountPasswordCreateParamsWithContext(ctx)
-	*secparams.Info.Password = strfmt.Password(password)
-	secparams.Info.Owner.Name = &svmName
-	*secparams.Info.Name = defaultSVMUsername
+	secparams.Info = &models.AccountPassword{
+		Name:     pointer.Pointer(defaultSVMUsername),
+		Password: pointer.Pointer(strfmt.Password(password)),
+		Owner: &models.AccountPasswordInlineOwner{
+			Name: &svmName,
+		},
+	}
 	_, err = ontapclient.Security.AccountPasswordCreate(secparams, nil)
 	if err != nil {
 		return err
