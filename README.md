@@ -244,6 +244,7 @@ parameters:
   csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
   backendType: "ontap-san"
   provisioningType: "thin"
+  fsType: "ext4"
 allowVolumeExpansion: true
 
 ```
