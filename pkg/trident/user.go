@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sethvargo/go-password/password"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-openapi/runtime"
 	"github.com/go-openapi/strfmt"
 	"github.com/metal-stack/ontap-go/api/client/security"
 	corev1 "k8s.io/api/core/v1"
@@ -207,7 +209,12 @@ func (m *SvmManager) CreateMissingSeedSecret(ctx context.Context, svmName string
 	}
 	_, err = ontapclient.Security.AccountPasswordCreate(secparams, nil)
 	if err != nil {
-		return fmt.Errorf("unable to create password for project %s on ontap:%w", svmName, err)
+		var apiErr *runtime.APIError
+		if errors.As(err, &apiErr) {
+			if !(apiErr.Code == 200 && strings.Contains(apiErr.Error(), "unexpected success response")) {
+				return fmt.Errorf("unable to create password for project %s on ontap:%w", svmName, err)
+			}
+		}
 	}
 
 	secretName := fmt.Sprintf(SecretNameFormat, svmName)
