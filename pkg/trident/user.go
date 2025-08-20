@@ -211,9 +211,12 @@ func (m *SvmManager) CreateMissingSeedSecret(ctx context.Context, svmName string
 	if err != nil {
 		var apiErr *runtime.APIError
 		if errors.As(err, &apiErr) {
+			// swallow unexpected success error
 			if apiErr.Code != 200 || !strings.Contains(apiErr.Error(), "unexpected success response") {
 				return fmt.Errorf("unable to create password for project %s on ontap:%w", svmName, err)
 			}
+		} else {
+			return fmt.Errorf("unable to create password for project %s on ontap:%w", svmName, err)
 		}
 	}
 
