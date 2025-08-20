@@ -170,7 +170,7 @@ func (m *SvmManager) updateExistingUserPassword(ctx context.Context, username, s
 		return password, ErrSeedSecretMissing
 	}
 
-	// swallow unexpected success error, done by @mwenrich
+	// swallow unexpected success error
 	if strings.Contains(pwdErr.Error(), "unexpected success response") && strings.Contains(pwdErr.Error(), "status 200") {
 		m.log.Info("Password updated successfully (reported as error)", "username", username, "svm", svmName)
 		return password, ErrSeedSecretMissing
