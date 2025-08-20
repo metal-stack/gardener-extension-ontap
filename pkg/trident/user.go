@@ -9,11 +9,9 @@ import (
 	"github.com/sethvargo/go-password/password"
 
 	"github.com/metal-stack/metal-lib/pkg/pointer"
-	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/go-openapi/runtime"
 	"github.com/go-openapi/strfmt"
 	"github.com/metal-stack/ontap-go/api/client/security"
 	corev1 "k8s.io/api/core/v1"
@@ -96,7 +94,7 @@ func (m *SvmManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOp
 		return passwordFromSecret, nil
 	}
 
-	// This block is only reached if userExistsOnOntap was determined to be false earlier.
+	// Generate password for either creating user or updating existing user password
 	password, err := generateSecurePassword()
 	if err != nil {
 		return "", err
@@ -109,6 +107,7 @@ func (m *SvmManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOp
 		vsadminRole = "vsadmin"
 	)
 
+	// Try to create user first
 	createAccountParams := security.NewAccountCreateParamsWithContext(ctx)
 	createAccountParams.SetInfo(&models.Account{
 		Name:     pointer.Pointer(opts.username),
@@ -130,12 +129,54 @@ func (m *SvmManager) createONTAPUserForSVM(ctx context.Context, opts ontapUserOp
 		},
 	})
 
-	if _, createErr := m.ontapClient.Security.AccountCreate(createAccountParams, nil); createErr != nil {
+	// Try to create user - if it succeeds, we're done with user creation
+	_, createErr := m.ontapClient.Security.AccountCreate(createAccountParams, nil)
+	if createErr == nil {
+		m.log.Info("ONTAP user created successfully", "username", opts.username, "svm", opts.svmName, "role", vsadminRole)
+		return password, ErrSeedSecretMissing
+	}
+
+	// Check if this is an AccountCreateDefault error
+	var apiErr *security.AccountCreateDefault
+	// if its not an error from the ontap api, this is another error so return
+	if !errors.As(createErr, &apiErr) {
 		return "", fmt.Errorf("failed to create ONTAP user '%s' for SVM '%s': %w", opts.username, opts.svmName, createErr)
 	}
 
-	m.log.Info("ONTAP user created successfully", "username", opts.username, "svm", opts.svmName, "role", vsadminRole)
-	return password, ErrSeedSecretMissing
+	// If it's not a 409 duplicate user error from ontap this is a real error
+	if apiErr.Code() != 409 {
+		return "", fmt.Errorf("failed to create ONTAP user '%s' for SVM '%s': %w", opts.username, opts.svmName, createErr)
+	}
+
+	// User already exists - try to update password
+	m.log.Info("User already exists, updating password", "username", opts.username, "svm", opts.svmName)
+	return m.updateExistingUserPassword(ctx, opts.username, opts.svmName, password)
+}
+
+// updateExistingUserPassword updates the password for an existing ONTAP user
+func (m *SvmManager) updateExistingUserPassword(ctx context.Context, username, svmName, password string) (string, error) {
+	secparams := security.NewAccountPasswordCreateParamsWithContext(ctx)
+	secparams.Info = &models.AccountPassword{
+		Name:     pointer.Pointer(username),
+		Password: pointer.Pointer(strfmt.Password(password)),
+		Owner: &models.AccountPasswordInlineOwner{
+			Name: &svmName,
+		},
+	}
+
+	_, pwdErr := m.ontapClient.Security.AccountPasswordCreate(secparams, nil)
+	if pwdErr == nil {
+		m.log.Info("Password updated successfully", "username", username, "svm", svmName)
+		return password, ErrSeedSecretMissing
+	}
+
+	// swallow unexpected success error, done by @mwenrich
+	if strings.Contains(pwdErr.Error(), "unexpected success response") && strings.Contains(pwdErr.Error(), "status 200") {
+		m.log.Info("Password updated successfully (reported as error)", "username", username, "svm", svmName)
+		return password, ErrSeedSecretMissing
+	}
+
+	return "", fmt.Errorf("failed to update password for existing user '%s' in SVM '%s': %w", username, svmName, pwdErr)
 }
 
 func (m *SvmManager) checkIfAccountExistsForSvm(ctx context.Context, svmName string, kubeSeedSecret string) (string, error) {
@@ -190,43 +231,6 @@ func buildSecret(secretName, userName, password, projectId string) *corev1.Secre
 			"password": password,
 		},
 	}
-}
-
-func (m *SvmManager) CreateMissingSeedSecret(ctx context.Context, svmName string, ontapclient *ontapv1.Ontap) error {
-	// The ontap api doesn't have a way of getting password for users, therefore we update the password and create the seed secret with the updated password
-	password, err := generateSecurePassword()
-	if err != nil {
-		return err
-	}
-
-	secparams := security.NewAccountPasswordCreateParamsWithContext(ctx)
-	secparams.Info = &models.AccountPassword{
-		Name:     pointer.Pointer(defaultSVMUsername),
-		Password: pointer.Pointer(strfmt.Password(password)),
-		Owner: &models.AccountPasswordInlineOwner{
-			Name: &svmName,
-		},
-	}
-	_, err = ontapclient.Security.AccountPasswordCreate(secparams, nil)
-	if err != nil {
-		var apiErr *runtime.APIError
-		if errors.As(err, &apiErr) {
-			// swallow unexpected success error
-			if apiErr.Code != 200 || !strings.Contains(apiErr.Error(), "unexpected success response") {
-				return fmt.Errorf("unable to create password for project %s on ontap:%w", svmName, err)
-			}
-		} else {
-			return fmt.Errorf("unable to create password for project %s on ontap:%w", svmName, err)
-		}
-	}
-
-	secretName := fmt.Sprintf(SecretNameFormat, svmName)
-	err = m.buildAndCreateSecretInSeed(ctx, secretName, defaultSVMUsername, password, svmName)
-	if err != nil {
-		return fmt.Errorf("unable to create secret %s in seed %w", secretName, err)
-	}
-
-	return nil
 }
 
 func (m *SvmManager) buildAndCreateSecretInSeed(ctx context.Context, secretName, userName, password, projectId string) error {

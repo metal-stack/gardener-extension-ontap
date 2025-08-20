@@ -311,8 +311,14 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 				err = m.seedClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Secret{ObjectMeta: v1.ObjectMeta{Name: secretName, Namespace: "kube-system"}}), &corev1.Secret{})
 				if err != nil {
 					if k8serrors.IsNotFound(err) {
-						m.log.Info("seed secret does not exist even tho svm exists, changing password of svm and creating seed secret", "secret", secretName)
-						err = m.CreateMissingSeedSecret(ctx, svmName, m.ontapClient)
+						m.log.Info("seed secret does not exist even tho svm exists, creating user and secret", "secret", secretName)
+						userOpts := userAndSecretOptions{
+							projectID:              svmName,
+							svmSeedSecretNamespace: "kube-system",
+							seedClient:             m.seedClient,
+							svmUUID:                *svm.UUID,
+						}
+						err = m.CreateUserAndSecret(ctx, userOpts)
 						if err != nil {
 							return nil, err
 						}
