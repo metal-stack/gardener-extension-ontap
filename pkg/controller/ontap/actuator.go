@@ -4,15 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
+	"github.com/gardener/gardener/extensions/pkg/util"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
+	"github.com/gardener/gardener/pkg/utils/managedresources"
 
-	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	extensionscontroller "github.com/gardener/gardener/extensions/pkg/controller"
 	"github.com/go-logr/logr"
+	"github.com/metal-stack/gardener-extension-ontap/charts"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
+	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config/v1alpha1"
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
+	"github.com/metal-stack/gardener-extension-ontap/pkg/imagevector"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/trident"
 	"github.com/metal-stack/metal-lib/pkg/tag"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -27,16 +33,22 @@ import (
 	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	secretNameFormat = "ontap-svm-%s-credentials"
 )
 
 // FIXME here the logic to deploy the trident operator
 
 type actuator struct {
-	ontap          *ontapv1.Ontap
-	client         client.Client
-	shootNamespace string
-	decoder        runtime.Decoder
-	config         config.ControllerConfiguration
+	ontap                *ontapv1.Ontap
+	client               client.Client
+	shootNamespace       string
+	decoder              runtime.Decoder
+	config               config.ControllerConfiguration
+	chartRendererFactory extensionscontroller.ChartRendererFactory
 }
 
 // NewActuator returns an actuator responsible for Extension resources.
@@ -47,10 +59,11 @@ func NewActuator(ctx context.Context, mgr manager.Manager, config config.Control
 	}
 
 	return &actuator{
-		ontap:   ontapClient,
-		client:  mgr.GetClient(),
-		decoder: serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-		config:  config,
+		ontap:                ontapClient,
+		client:               mgr.GetClient(),
+		decoder:              serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
+		config:               config,
+		chartRendererFactory: extensionscontroller.ChartRendererFactoryFunc(util.NewChartRendererForShoot),
 	}, nil
 }
 
@@ -119,36 +132,33 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 	log.Info("raw provideconfig", "tridentconfig", string(ex.Spec.ProviderConfig.Raw))
 
+	// TODO: should be validated by an admission controller, not here
 	if err := ontapConfig.Validate(); err != nil {
 		return fmt.Errorf("invalid trident config: %w", err)
 	}
 
-	cluster := &extensionsv1alpha1.Cluster{}
-	if err := a.client.Get(ctx, client.ObjectKey{Name: ex.Namespace}, cluster); err != nil {
-		return fmt.Errorf("failed to get cluster object: %w", err)
-	}
-	if cluster.Spec.Shoot.Raw == nil {
-		return fmt.Errorf("cluster.spec.shoot.raw is nil")
+	namespace := ex.GetNamespace()
+
+	cluster, err := extensionscontroller.GetCluster(ctx, a.client, namespace)
+	if err != nil {
+		return err
 	}
 
-	shoot := &gardencorev1beta1.Shoot{}
-	if _, _, err := a.decoder.Decode(cluster.Spec.Shoot.Raw, nil, shoot); err != nil {
-		log.Error(err, "failed to decode shoot, continuing with partial shoot object")
-	}
-
-	log.Info("Shoot annotations", "annotations", shoot.Annotations)
-	var projectTag tag.TagMap = shoot.Annotations
+	// TODO: this value has to come from the extension object, not some arbitrary cluster tag
+	var projectTag tag.TagMap = cluster.Shoot.Annotations
 	projectId, ok := projectTag.Value(tag.ClusterProject)
 	if !ok || projectId == "" {
 		return fmt.Errorf("no project ID found in shoot annotations")
 	}
 
+	// TODO: factor out into function
 	log.Info("Found project ID in shoot annotations", "projectId", projectId)
 	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
 	// ontap wants a letter or _ as prefix
 	projectId = "p" + projectId
 
+	// TODO: who cleans up this secret? what if there is a second seed in this partition? should be returned by ensure function?
 	svmSeedSecretNamespace := "kube-system"
 
 	log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
@@ -156,7 +166,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return err
 	}
 
-	seedsecretName := fmt.Sprintf(trident.SecretNameFormat, projectId)
+	seedsecretName := fmt.Sprintf(secretNameFormat, projectId)
 	log.Info("Using credentials from secret in shoot cluster", "secretName", seedsecretName, "namespace", "kube-system")
 
 	// get existing secret for svm in kube-system namespace
@@ -173,22 +183,41 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	if !ok {
 		return fmt.Errorf("password not found in seed secret secretname:%s", seedsecretName)
 	}
-
-	svmIpAddresses := ontapv1alpha1.SvmIpaddresses{
-		DataLifs:      ontapConfig.SvmIpaddresses.DataLifs,
-		ManagementLif: ontapConfig.SvmIpaddresses.ManagementLif,
-	}
-
-	tridentValues := trident.DeployTridentValues{
-		Namespace:      a.shootNamespace,
-		ProjectId:      projectId,
-		SeedsecretName: &seedsecretName,
-		SvmIpAddresses: svmIpAddresses,
-		Username:       string(username),
-		Password:       string(password),
-	}
-	err := trident.DeployTrident(ctx, log, a.client, tridentValues)
+	tridentOperatorImage, err := imagevector.ImageVector().FindImage("trident-operator")
 	if err != nil {
+		return err
+	}
+	busyboxImage, err := imagevector.ImageVector().FindImage("busybox")
+	if err != nil {
+		return err
+	}
+
+	values := map[string]any{
+		"images": map[string]any{
+			"trident-operator": tridentOperatorImage,
+			"busybox":          busyboxImage,
+		},
+		"projectID":       projectId,
+		"managementLifIP": ontapConfig.SvmIpaddresses.ManagementLif,
+		"dataLifs":        ontapConfig.SvmIpaddresses.DataLifs,
+		"username":        string(username),
+		"password":        string(password),
+	}
+
+	version := cluster.Shoot.Spec.Kubernetes.Version
+
+	chartRenderer, err := a.chartRendererFactory.NewChartRendererForShoot(version)
+	if err != nil {
+		return fmt.Errorf("could not create chart renderer for shoot '%s': %w", namespace, err)
+	}
+
+	release, err := chartRenderer.RenderEmbeddedFS(charts.InternalChart, filepath.Join(charts.InternalChartsPath, "shoot-trident"), "shoot-trident", metav1.NamespaceSystem, values)
+	if err != nil {
+		return err
+	}
+
+	data := map[string][]byte{"config.yaml": release.Manifest()}
+	if err := managedresources.CreateForShoot(ctx, a.client, namespace, v1alpha1.ShootOntapResourceName, "extension-ontap", false, data); err != nil {
 		return err
 	}
 
@@ -199,25 +228,15 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 // Delete the Extension resource.
 func (a *actuator) Delete(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentBackendsMR, false); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentBackendsMR); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentInitMR, false); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentInitMR); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentCRDsName, false); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentCRDsName); err != nil {
-	// 	return err
-	// }
-	// log.Info("ManagedResource for Trident operator successfully deleted.")
+	if err := managedresources.Delete(ctx, a.client, ex.Namespace, v1alpha1.ShootOntapResourceName, false); err != nil {
+		return err
+	}
+	if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, v1alpha1.ShootOntapResourceName); err != nil {
+		return err
+	}
+
+	log.Info("ManagedResource for Trident operator successfully deleted")
+
 	return nil
 }
 

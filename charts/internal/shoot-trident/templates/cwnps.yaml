@@ -1,0 +1,21 @@
+{{ if .Capabilities.APIVersions.Has "metal-stack.io/v1" -}}
+apiVersion: metal-stack.io/v1
+kind: ClusterwideNetworkPolicy
+metadata:
+  namespace: firewall
+  name: allow-to-ontap
+spec:
+  egress:
+  - to:
+    - cidr: "{{ .Values.managementLifIP }}/32"
+    ports:
+    - protocol: TCP
+      port: 443
+  - to:
+    {{ range .Values.dataLifs -}}
+    - cidr: "{{ . }}/32"
+    {{ end -}}
+    ports:
+    - protocol: TCP
+      port: 4420
+{{- end }}
