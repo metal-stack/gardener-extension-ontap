@@ -15,14 +15,17 @@ import (
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	"github.com/metal-stack/ontap-go/api/client/storage"
 	"github.com/metal-stack/ontap-go/api/models"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 )
 
 var (
-	// ErrNotFound is returned if the svm was not found
-	ErrNotFound = errors.New("NotFound")
+	// ErrSvmNotFound is returned if the svm was not found
+	ErrSvmNotFound = errors.New("NotFound")
 	// ErrAlreadyExists is returned when the entity already exists
 	ErrAlreadyExists = errors.New("AlreadyExists")
 
@@ -55,14 +58,14 @@ type networkInterfaceOptions struct {
 	isDataLif bool
 }
 
-type SvnManager struct {
+type SvmManager struct {
 	log         logr.Logger
 	ontapClient *ontapv1.Ontap
 	seedClient  client.Client
 }
 
-func NewSvmManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient client.Client) *SvnManager {
-	return &SvnManager{
+func NewSvmManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient client.Client) *SvmManager {
+	return &SvmManager{
 		log:         log,
 		ontapClient: ontapClient,
 		seedClient:  seedClient,
@@ -70,7 +73,7 @@ func NewSvmManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient clien
 }
 
 // CreateSVM creates an SVM and sets up network interfaces on a selected node
-func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error {
+func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error {
 	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLifs", opts.SvmIpaddresses.DataLifs)
 
 	// 1. Get a node for network interface placement and aggregate selection
@@ -177,7 +180,7 @@ func (m *SvnManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 
 // getAllNodesInCluster fetches the first node name found in the ONTAP cluster
 // Needs to be changed, waiting for Netapp answer
-func (m *SvnManager) getAllNodesInCluster(ctx context.Context) ([]string, error) {
+func (m *SvmManager) getAllNodesInCluster(ctx context.Context) ([]string, error) {
 	m.log.Info("Fetching first available node in cluster...")
 
 	var nodeUUIDs []string
@@ -214,7 +217,7 @@ func (m *SvnManager) getAllNodesInCluster(ctx context.Context) ([]string, error)
 }
 
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
-func (m *SvnManager) createNetworkInterfaceForSvm(ctx context.Context, opts networkInterfaceOptions) error {
+func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts networkInterfaceOptions) error {
 
 	m.log.Info("Creating network interface", "svm", opts.svmName, "lifName", opts.lifName, "ip", opts.ipAddress, "node", opts.nodeUUID)
 
@@ -279,48 +282,70 @@ func (m *SvnManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 }
 
 // Returns a svm by inputting the svmName, i.e. projectId
-func (m *SvnManager) GetSVMByName(ctx context.Context, svmName string) (string, error) {
-
+func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string, error) {
 	if m.ontapClient == nil || m.ontapClient.SVM == nil {
-		return "", fmt.Errorf("API client or SVM service is not initialized")
+		return nil, fmt.Errorf("API client or SVM service is not initialized")
 	}
 
 	params := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
 	svmGetOK, err := m.ontapClient.SVM.SvmCollectionGet(params, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch SVMs: %w", err)
+		return nil, fmt.Errorf("failed to fetch SVMs: %w", err)
 	}
 
 	m.log.Info("Checking for SVM with name", "name", svmName)
-
 	if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
 		m.log.Info("No SVMs found in the response")
-		return "", ErrNotFound
+		return nil, ErrSvmNotFound
 	}
 
 	for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
 		if svm.Name != nil && *svm.Name == svmName {
 			if svm.UUID != nil {
 				m.log.Info("Found SVM", "name", svmName, "uuid", *svm.UUID)
-				return *svm.UUID, nil
+
+				// Check for the seed secret, if it's not there create it here, because the svm already exists but seed secret is missing
+				// This can only happen on the first shoot of the project
+				// If this happens on the second shoot or n shoot, something is really broken
+				secretName := fmt.Sprintf("ontap-svm-%s-credentials", svmName)
+				err = m.seedClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Secret{ObjectMeta: v1.ObjectMeta{Name: secretName, Namespace: "kube-system"}}), &corev1.Secret{})
+				if err != nil {
+					if k8serrors.IsNotFound(err) {
+						m.log.Info("seed secret does not exist even tho svm exists, creating user and secret", "secret", secretName)
+						userOpts := userAndSecretOptions{
+							projectID:              svmName,
+							svmSeedSecretNamespace: "kube-system",
+							seedClient:             m.seedClient,
+							svmUUID:                *svm.UUID,
+						}
+						err = m.CreateUserAndSecret(ctx, userOpts)
+						if err != nil {
+							return nil, err
+						}
+					} else {
+						return nil, err
+					}
+				}
+
+				// Return the UUID when SVM is found and seed secret exists
+				return svm.UUID, nil
 			}
-			return "", ErrNotFound
 		}
 	}
 
 	m.log.Info("SVM not found", "name", svmName)
-	return "", ErrNotFound
+	return nil, ErrSvmNotFound
 }
 
 // waitForSvmReady polls until the SVM exists and is in a "running" state.
-func (m *SvnManager) waitForSvmReady(ctx context.Context, svmName string) (string, error) {
+func (m *SvmManager) waitForSvmReady(ctx context.Context, svmName string) (string, error) {
 	m.log.Info("waiting for SVM to be ready", "svmName", svmName)
 
 	var uuid string
 	err := retry.Do(func() error {
 		svmUUID, err := m.GetSVMByName(ctx, svmName)
 		if err != nil {
-			if errors.Is(err, ErrNotFound) {
+			if errors.Is(err, ErrSvmNotFound) {
 				m.log.Info("SVM not found by name yet, retrying...", "svmName", svmName)
 				return err
 			}
@@ -329,7 +354,7 @@ func (m *SvnManager) waitForSvmReady(ctx context.Context, svmName string) (strin
 		}
 
 		getParams := s_vm.NewSvmGetParamsWithContext(ctx)
-		getParams.SetUUID(svmUUID)
+		getParams.SetUUID(*svmUUID)
 
 		svmInfo, err := m.ontapClient.SVM.SvmGet(getParams, nil)
 		if err != nil {
@@ -351,7 +376,7 @@ func (m *SvnManager) waitForSvmReady(ctx context.Context, svmName string) (strin
 
 		if svmInfo.Payload.Nvme != nil && svmInfo.Payload.Nvme.Enabled != nil && *svmInfo.Payload.Nvme.Enabled {
 			m.log.Info("SVM is ready and NVMe is enabled", "svmName", svmName, "uuid", svmUUID, "state", currentState)
-			uuid = svmUUID
+			uuid = *svmUUID
 			return nil
 		}
 
