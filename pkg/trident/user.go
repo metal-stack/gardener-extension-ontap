@@ -50,33 +50,241 @@ type ontapUserOptions struct {
 	svmUUID          string
 }
 
-// CreateUserAndSecret creates an svm scoped account set to vsadmin role.
-func (m *SvmManager) CreateUserAndSecret(ctx context.Context, opts userAndSecretOptions) error {
-	m.log.Info("Creating user for SVM", "svm", opts.projectID)
+// validateAndEnsureCompleteUserState validates all user components and creates missing parts
+func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, opts userAndSecretOptions) error {
+	m.log.Info("Validating complete user state", "svm", opts.projectID, "namespace", opts.svmSeedSecretNamespace)
+
+	// 1. Check K8s secret state first
 	secretName := fmt.Sprintf(SecretNameFormat, opts.projectID)
-	// Create or update user with the vsadmin role
-	ontapUserOpts := ontapUserOptions{
+	existingPassword, secretErr := m.checkIfAccountExistsForSvm(ctx, opts.projectID, opts.svmSeedSecretNamespace)
+
+	// 2. Check if ontap user exists already
+	ontapUserExists, ontapPassword, userErr := m.validateONTAPUserExists(ctx, opts)
+
+	// 3. Determine what needs to be created/updated
+	switch {
+	// Both exist - validate password consistency
+	case errors.Is(secretErr, ErrAlreadyExists) && ontapUserExists:
+		return m.validatePasswordConsistency(ctx, opts, existingPassword, ontapPassword)
+	// Secret exists but ONTAP user missing - create ONTAP user with existing password
+	case errors.Is(secretErr, ErrAlreadyExists) && !ontapUserExists:
+		m.log.Info("K8s secret exists but ONTAP user missing, creating ONTAP user", "svm", opts.projectID)
+		return m.createONTAPUserWithPassword(ctx, opts, existingPassword)
+
+	case errors.Is(secretErr, ErrSeedSecretMissing) && ontapUserExists:
+		// ONTAP user exists but secret missing - create secret with new password
+		m.log.Info("ONTAP user exists but K8s secret missing, updating password and creating secret", "svm", opts.projectID)
+		newPassword, err := m.resetONTAPUserPassword(ctx, opts)
+		if err != nil {
+			return err
+		}
+		return m.buildAndCreateSecretInSeed(ctx, secretName, defaultSVMUsername, newPassword, opts.projectID)
+
+	case errors.Is(secretErr, ErrSeedSecretMissing) && !ontapUserExists:
+		// Neither exists - create both
+		m.log.Info("Neither ONTAP user nor K8s secret exist, creating both", "svm", opts.projectID)
+		return m.createCompleteUserAndSecret(ctx, opts)
+
+	default:
+		// Handle other errors
+		if secretErr != nil && !errors.Is(secretErr, ErrSeedSecretMissing) && !errors.Is(secretErr, ErrAlreadyExists) {
+			return fmt.Errorf("failed to check K8s secret state: %w", secretErr)
+		}
+		if userErr != nil {
+			return fmt.Errorf("failed to check ONTAP user state: %w", userErr)
+		}
+		return fmt.Errorf("unexpected state combination")
+	}
+}
+
+// validateONTAPUserExists checks if ONTAP user exists by attempting creation
+func (m *SvmManager) validateONTAPUserExists(ctx context.Context, opts userAndSecretOptions) (bool, string, error) {
+	// Generate a test password
+	testPassword, err := generateSecurePassword()
+	if err != nil {
+		return false, "", err
+	}
+
+	ontapOpts := ontapUserOptions{
 		username:         defaultSVMUsername,
 		svmName:          opts.projectID,
 		kubeSeedSecretNs: opts.svmSeedSecretNamespace,
 		svmUUID:          opts.svmUUID,
 	}
-	password, err := m.createONTAPUserForSVM(ctx, ontapUserOpts)
-	// If the secret doesn't exist in the seed that means, this is the first shoot therefore we need to create it.
-	if err != nil {
-		m.log.Error(err, "unable to create svm user")
-		if errors.Is(err, ErrSeedSecretMissing) {
-			m.log.Info("seed Secret missing for first shoot, creating...")
-			err = m.buildAndCreateSecretInSeed(ctx, secretName, defaultSVMUsername, password, opts.projectID)
-			if err != nil {
-				return err
-			}
-			return nil
-		}
-		return fmt.Errorf("error occurred during creation of ontap user for svm %w", err)
+
+	// Try to create user if 409, user exists
+	_, createErr := m.attemptUserCreation(ctx, ontapOpts, testPassword)
+	if createErr == nil {
+		// User was created successfully, so it didn't exist before
+		return false, testPassword, nil
 	}
-	m.log.Info("User created with vsadmin role and secret deployed successfully", "projectId", opts.projectID, "secretName", secretName)
+
+	// Check if it's a 409 conflict
+	var apiErr *security.AccountCreateDefault
+	if errors.As(createErr, &apiErr) && apiErr.Code() == 409 {
+		// User exists - return true with empty password (we don't know the current password)
+		return true, "", nil
+	}
+
+	return false, "", fmt.Errorf("failed to validate ONTAP user existence: %w", createErr)
+}
+
+// attemptUserCreation tries to create a user with given password
+func (m *SvmManager) attemptUserCreation(ctx context.Context, opts ontapUserOptions, password string) (string, error) {
+	var (
+		application = "http"
+		authMethod  = "password"
+		pwdVal      = strfmt.Password(password)
+		vsadminRole = "vsadmin"
+	)
+
+	createAccountParams := security.NewAccountCreateParamsWithContext(ctx)
+	createAccountParams.SetInfo(&models.Account{
+		Name:     pointer.Pointer(opts.username),
+		Password: &pwdVal,
+		Role: &models.AccountInlineRole{
+			Name: pointer.Pointer(vsadminRole),
+		},
+		Locked: pointer.Pointer(false),
+		Owner: &models.AccountInlineOwner{
+			UUID: pointer.Pointer(opts.svmUUID),
+		},
+		AccountInlineApplications: []*models.AccountApplication{
+			{
+				Application: &application,
+				AuthenticationMethods: []*string{
+					&authMethod,
+				},
+			},
+		},
+	})
+
+	_, err := m.ontapClient.Security.AccountCreate(createAccountParams, nil)
+	return password, err
+}
+
+// createONTAPUserWithPassword creates ONTAP user with specific password
+func (m *SvmManager) createONTAPUserWithPassword(ctx context.Context, opts userAndSecretOptions, password string) error {
+	ontapOpts := ontapUserOptions{
+		username:         defaultSVMUsername,
+		svmName:          opts.projectID,
+		kubeSeedSecretNs: opts.svmSeedSecretNamespace,
+		svmUUID:          opts.svmUUID,
+	}
+
+	_, err := m.attemptUserCreation(ctx, ontapOpts, password)
+	if err != nil {
+		return fmt.Errorf("failed to create ONTAP user with existing password: %w", err)
+	}
+
+	m.log.Info("Successfully created ONTAP user with existing password", "svm", opts.projectID)
 	return nil
+}
+
+// resetONTAPUserPassword updates existing user password
+func (m *SvmManager) resetONTAPUserPassword(ctx context.Context, opts userAndSecretOptions) (string, error) {
+	password, err := generateSecurePassword()
+	if err != nil {
+		return "", err
+	}
+
+	_, err = m.updateExistingUserPassword(ctx, defaultSVMUsername, opts.projectID, password)
+	if err != nil {
+		return "", fmt.Errorf("failed to reset ONTAP user password: %w", err)
+	}
+
+	return password, nil
+}
+
+// createCompleteUserAndSecret creates both ONTAP user and K8s secret
+func (m *SvmManager) createCompleteUserAndSecret(ctx context.Context, opts userAndSecretOptions) error {
+	password, err := generateSecurePassword()
+	if err != nil {
+		return err
+	}
+
+	// Create ONTAP user
+	ontapOpts := ontapUserOptions{
+		username:         defaultSVMUsername,
+		svmName:          opts.projectID,
+		kubeSeedSecretNs: opts.svmSeedSecretNamespace,
+		svmUUID:          opts.svmUUID,
+	}
+
+	_, err = m.attemptUserCreation(ctx, ontapOpts, password)
+	if err != nil {
+		return fmt.Errorf("failed to create ONTAP user: %w", err)
+	}
+
+	// Create K8s secret
+	secretName := fmt.Sprintf(SecretNameFormat, opts.projectID)
+	err = m.buildAndCreateSecretInSeed(ctx, secretName, defaultSVMUsername, password, opts.projectID)
+	if err != nil {
+		return fmt.Errorf("failed to create K8s secret after ONTAP user creation: %w", err)
+	}
+
+	m.log.Info("Successfully created complete user and secret", "svm", opts.projectID)
+	return nil
+}
+
+// validatePasswordConsistency ensures ONTAP and K8s passwords match
+func (m *SvmManager) validatePasswordConsistency(ctx context.Context, opts userAndSecretOptions, secretPassword, ontapPassword string) error {
+	m.log.Info("Both ONTAP user and K8s secret exist, validating consistency", "svm", opts.projectID)
+
+	// Since we can't directly validate ONTAP password, we'll try to update it
+	// If the update succeeds, we know the user is functional
+	_, err := m.updateExistingUserPassword(ctx, defaultSVMUsername, opts.projectID, secretPassword)
+	if err != nil {
+		// If password update fails, try to fix by generating new password
+		m.log.Info("Password consistency validation failed, resetting password", "svm", opts.projectID)
+		newPassword, resetErr := m.resetONTAPUserPassword(ctx, opts)
+		if resetErr != nil {
+			return fmt.Errorf("failed to reset password for consistency: %w", resetErr)
+		}
+
+		// Update K8s secret with new password
+		secretName := fmt.Sprintf(SecretNameFormat, opts.projectID)
+		return m.updateSecretInSeed(ctx, secretName, opts.svmSeedSecretNamespace, defaultSVMUsername, newPassword, opts.projectID)
+	}
+
+	m.log.Info("Password consistency validation successful", "svm", opts.projectID)
+	return nil
+}
+
+// updateSecretInSeed updates an existing secret in the seed cluster
+func (m *SvmManager) updateSecretInSeed(ctx context.Context, secretName, namespace, username, password, projectId string) error {
+	// Try to get existing secret first
+	existingSecret := &corev1.Secret{}
+	err := m.seedClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: secretName}, existingSecret)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Secret doesn't exist, create it
+			return m.buildAndCreateSecretInSeed(ctx, secretName, username, password, projectId)
+		}
+		return fmt.Errorf("failed to get existing secret: %w", err)
+	}
+
+	// Secret exists, update it
+	existingSecret.Data = map[string][]byte{
+		"username": []byte(username),
+		"password": []byte(password),
+	}
+	existingSecret.StringData = nil
+
+	if err := m.seedClient.Update(ctx, existingSecret); err != nil {
+		return fmt.Errorf("failed to update secret in seed: %w", err)
+	}
+
+	m.log.Info("Successfully updated secret in seed", "secretName", secretName, "namespace", namespace)
+	return nil
+}
+
+// CreateUserAndSecret creates an svm scoped account set to vsadmin role.
+func (m *SvmManager) CreateUserAndSecret(ctx context.Context, opts userAndSecretOptions) error {
+	m.log.Info("Ensuring complete user and secret state", "svm", opts.projectID)
+
+	// Use comprehensive validation instead of simple creation
+	return m.validateAndEnsureCompleteUserState(ctx, opts)
 }
 
 // createONTAPUserForSVM checks if the user exists on ONTAP first, then potentially creates it.
@@ -237,8 +445,14 @@ func (m *SvmManager) buildAndCreateSecretInSeed(ctx context.Context, secretName,
 	tridentSecret := buildSecret(secretName, defaultSVMUsername, password, projectId)
 	// make this use of managedResource aswell, otherwise seed secret can be deleted
 	if err := m.seedClient.Create(ctx, tridentSecret); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			// Secret already exists, try to update it instead
+			m.log.Info("Secret already exists, updating it", "secretName", secretName)
+			return m.updateSecretInSeed(ctx, secretName, svmSeedSecretNamespace, userName, password, projectId)
+		}
 		return fmt.Errorf("creating secret in seed failed: %w", err)
 	}
 
+	m.log.Info("Successfully created secret in seed", "secretName", secretName)
 	return nil
 }
