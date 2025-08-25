@@ -59,13 +59,13 @@ func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, opt
 	existingPassword, secretErr := m.checkIfAccountExistsForSvm(ctx, opts.projectID, opts.svmSeedSecretNamespace)
 
 	// 2. Check if ontap user exists already
-	ontapUserExists, ontapPassword, userErr := m.validateONTAPUserExists(ctx, opts)
+	ontapUserExists, _, userErr := m.validateONTAPUserExists(ctx, opts)
 
 	// 3. Determine what needs to be created/updated
 	switch {
 	// Both exist - validate password consistency
 	case errors.Is(secretErr, ErrAlreadyExists) && ontapUserExists:
-		return m.validatePasswordConsistency(ctx, opts, existingPassword, ontapPassword)
+		return m.validatePasswordConsistency(ctx, opts, existingPassword)
 	// Secret exists but ONTAP user missing - create ONTAP user with existing password
 	case errors.Is(secretErr, ErrAlreadyExists) && !ontapUserExists:
 		m.log.Info("K8s secret exists but ONTAP user missing, creating ONTAP user", "svm", opts.projectID)
@@ -102,7 +102,7 @@ func (m *SvmManager) validateONTAPUserExists(ctx context.Context, opts userAndSe
 	params.SetOwnerUUID(&opts.svmUUID)
 	username := defaultSVMUsername
 	params.SetName(&username)
-	
+
 	result, err := m.ontapClient.Security.AccountCollectionGet(params, nil)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to query ONTAP users: %w", err)
@@ -111,7 +111,7 @@ func (m *SvmManager) validateONTAPUserExists(ctx context.Context, opts userAndSe
 	if result.Payload != nil && len(result.Payload.AccountResponseInlineRecords) > 0 {
 		return true, "", nil // User exists
 	}
-	
+
 	return false, "", nil // User doesn't exist
 }
 
@@ -214,7 +214,7 @@ func (m *SvmManager) createCompleteUserAndSecret(ctx context.Context, opts userA
 }
 
 // validatePasswordConsistency ensures ONTAP and K8s passwords match
-func (m *SvmManager) validatePasswordConsistency(ctx context.Context, opts userAndSecretOptions, secretPassword, ontapPassword string) error {
+func (m *SvmManager) validatePasswordConsistency(ctx context.Context, opts userAndSecretOptions, secretPassword string) error {
 	m.log.Info("Both ONTAP user and K8s secret exist, validating consistency", "svm", opts.projectID)
 
 	// Since we can't directly validate ONTAP password, we'll try to update it

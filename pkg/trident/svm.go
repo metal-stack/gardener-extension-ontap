@@ -378,7 +378,7 @@ func (m *SvmManager) validateAndEnsureDataLIFs(ctx context.Context, svmUUID, svm
 				m.log.Info("Data LIF already exists with correct IP", "lifName", expectedLifName, "ip", datalifIp)
 				continue
 			} else {
-				m.log.Info("Data LIF exists but with different IP, skipping", "lifName", expectedLifName, "existing", existingIP, "expected", datalifIp)
+				m.log.Error(fmt.Errorf("Data LIF exists but with different IP"), "skipping", "lifName", expectedLifName, "existing", existingIP, "expected", datalifIp)
 				continue // Don't try to fix IP mismatches for now
 			}
 		}
@@ -414,7 +414,7 @@ func (m *SvmManager) validateAndEnsureManagementLIF(ctx context.Context, svmUUID
 			m.log.Info("Management LIF already exists with correct IP", "ip", managementIP)
 			return nil
 		} else {
-			m.log.Info("Management LIF exists but with different IP, skipping", "existing", existingIP, "expected", managementIP)
+			m.log.Error(fmt.Errorf("Management LIF exists but with different IP"), "skipping", "existing", existingIP, "expected", managementIP)
 			return nil // Don't try to fix IP mismatches for now
 		}
 	}
