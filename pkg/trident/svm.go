@@ -207,7 +207,6 @@ func (m *SvmManager) getAllNodesInCluster(ctx context.Context) ([]string, error)
 	if len(nodeRecords) < 2 {
 		// we want more than 1 node for metro a metro cluster setup
 		return nil, fmt.Errorf("less than 2 nodes were returned for cluster %v,err: %w", nodeUUIDs, err)
-
 	}
 
 	return nodeUUIDs, nil
@@ -344,13 +343,14 @@ func (m *SvmManager) validateSVMRunningState(ctx context.Context, svmUUID, svmNa
 func (m *SvmManager) getExistingNetworkInterfaces(ctx context.Context, svmUUID string) (map[string]string, error) {
 	params := networking.NewNetworkIPInterfacesGetParamsWithContext(ctx)
 	params.SetSvmUUID(&svmUUID)
+	fields := []string{"name", "ip.address"}
+	params.SetFields(fields)
 
 	result, err := m.ontapClient.Networking.NetworkIPInterfacesGet(params, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get network interfaces: %w", err)
 	}
 
-	// get all interfaces of the svm with its lifname
 	interfaces := make(map[string]string)
 	if result.Payload != nil && result.Payload.IPInterfaceResponseInlineRecords != nil {
 		for _, intf := range result.Payload.IPInterfaceResponseInlineRecords {

@@ -82,7 +82,6 @@ func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, opt
 
 	case errors.Is(secretErr, ErrSeedSecretMissing) && !ontapUserExists:
 		// Neither exists - create both
-		m.log.Info("Neither ONTAP user nor K8s secret exist, creating both", "svm", opts.projectID)
 		return m.createCompleteUserAndSecret(ctx, opts)
 
 	default:
@@ -97,36 +96,23 @@ func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, opt
 	}
 }
 
-// validateONTAPUserExists checks if ONTAP user exists by attempting creation
+// validateONTAPUserExists checks if ONTAP user exists by querying accounts
 func (m *SvmManager) validateONTAPUserExists(ctx context.Context, opts userAndSecretOptions) (bool, string, error) {
-	// Generate a test password
-	testPassword, err := generateSecurePassword()
+	params := security.NewAccountCollectionGetParamsWithContext(ctx)
+	params.SetOwnerUUID(&opts.svmUUID)
+	username := defaultSVMUsername
+	params.SetName(&username)
+	
+	result, err := m.ontapClient.Security.AccountCollectionGet(params, nil)
 	if err != nil {
-		return false, "", err
+		return false, "", fmt.Errorf("failed to query ONTAP users: %w", err)
 	}
 
-	ontapOpts := ontapUserOptions{
-		username:         defaultSVMUsername,
-		svmName:          opts.projectID,
-		kubeSeedSecretNs: opts.svmSeedSecretNamespace,
-		svmUUID:          opts.svmUUID,
+	if result.Payload != nil && len(result.Payload.AccountResponseInlineRecords) > 0 {
+		return true, "", nil // User exists
 	}
-
-	// Try to create user if 409, user exists
-	_, createErr := m.attemptUserCreation(ctx, ontapOpts, testPassword)
-	if createErr == nil {
-		// User was created successfully, so it didn't exist before
-		return false, testPassword, nil
-	}
-
-	// Check if it's a 409 conflict
-	var apiErr *security.AccountCreateDefault
-	if errors.As(createErr, &apiErr) && apiErr.Code() == 409 {
-		// User exists - return true with empty password (we don't know the current password)
-		return true, "", nil
-	}
-
-	return false, "", fmt.Errorf("failed to validate ONTAP user existence: %w", createErr)
+	
+	return false, "", nil // User doesn't exist
 }
 
 // attemptUserCreation tries to create a user with given password
@@ -301,13 +287,13 @@ func (m *SvmManager) updateExistingUserPassword(ctx context.Context, username, s
 	_, pwdErr := m.ontapClient.Security.AccountPasswordCreate(secparams, nil)
 	if pwdErr == nil {
 		m.log.Info("Password updated successfully", "username", username, "svm", svmName)
-		return password, ErrSeedSecretMissing
+		return password, nil
 	}
 
 	// swallow unexpected success error
 	if strings.Contains(pwdErr.Error(), "unexpected success response") && strings.Contains(pwdErr.Error(), "status 200") {
 		m.log.Info("Password updated successfully (reported as error)", "username", username, "svm", svmName)
-		return password, ErrSeedSecretMissing
+		return password, nil
 	}
 
 	return "", fmt.Errorf("failed to update password for existing user '%s' in SVM '%s': %w", username, svmName, pwdErr)
