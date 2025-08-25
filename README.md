@@ -3,6 +3,7 @@
 This repository contains the Gardener extension controller for managing the NetApp ONTAP CSI Plugin.
 
 ## Table of Contents
+
 - [Prerequisites](#prerequisites)
 - [Development Workflow](#development-workflow)
 - [Test Environment Setup](#test-environment-setup)
@@ -18,21 +19,25 @@ This repository contains the Gardener extension controller for managing the NetA
 ### Setup Gardener Locally
 
 1. Clone the Gardener Repository:
+
 ```bash
 git clone git@github.com:gardener/gardener.git
 ```
 
 2. Start a local Kubernetes cluster:
+
 ```bash
 make kind-up
 ```
 
 3. Deploy Gardener:
+
 ```bash
 make gardener-up
 ```
 
 4. Generate Helm Charts:
+
 ```bash
 make generate
 ```
@@ -40,11 +45,13 @@ make generate
 ### Deploy the Extension
 
 1. Apply the example configuration:
+
 ```bash
 kubectl apply -k example/
 ```
 
 2. Apply the shoot cluster configuration:
+
 ```bash
 kubectl apply -f example/shoot.yaml
 ```
@@ -52,6 +59,7 @@ kubectl apply -f example/shoot.yaml
 ### Update Code Changes
 
 When making changes to the code, build and deploy locally using:
+
 ```bash
 make push-to-gardener-local
 ```
@@ -59,6 +67,7 @@ make push-to-gardener-local
 ### Access the Shoot Cluster
 
 1. Adjust your `/etc/hosts` file:
+
 ```bash
 cat <<EOF | sudo tee -a /etc/hosts
 # Begin of Gardener local setup section
@@ -76,11 +85,13 @@ EOF
 ```
 
 2. Generate the kubeconfig for the shoot cluster:
+
 ```bash
 ./hack/usage/generate-admin-kubeconf.sh > admin-kubeconf.yaml
 ```
 
 3. Trigger a reconciliation if needed:
+
 ```bash
 kubectl -n garden-<project-name> annotate shoot <shoot-name> gardener.cloud/operation=reconcile
 ```
@@ -246,7 +257,6 @@ parameters:
   provisioningType: "thin"
   fsType: "ext4"
 allowVolumeExpansion: true
-
 ```
 
 3. PVC Using the Encrypted StorageClass
@@ -270,3 +280,22 @@ spec:
 - Secret name in StorageClass must match actual secret name
 - Secret namespace in StorageClass must match where secret is created
 - PVC must reference the StorageClass with encryption annotations
+
+### **Reconcile State Matrix**
+
+| SVM | Data LIFs | Mgmt LIF | ONTAP User | Seed Secret | Action Taken                                   | Code Path                                                            |
+| --- | --------- | -------- | ---------- | ----------- | ---------------------------------------------- | -------------------------------------------------------------------- |
+| ❌  | ❌        | ❌       | ❌         | ❌          | Create complete SVM from scratch               | `EnsureCompleteSVM()` → `CreateSVM()`                                |
+| ✅  | ❌        | ❌       | ❌         | ❌          | Validate SVM + Create all LIFs + Create User   | `validateAndEnsureCompleteSVMState()`                                |
+| ✅  | ✅        | ❌       | ❌         | ❌          | Create missing data LIFs + Mgmt LIF + User     | `validateAndEnsureDataLIFs()` + `validateAndEnsureManagementLIF()`   |
+| ✅  | ✅        | ❌       | ❌         | ❌          | Create management LIF + Complete user creation | `validateAndEnsureManagementLIF()` → `createCompleteUserAndSecret()` |
+| ✅  | ✅        | ✅       | ❌         | ❌          | Create ONTAP user and K8s secret               | `createCompleteUserAndSecret()`                                      |
+| ✅  | ✅        | ✅       | ✅         | ❌          | Reset ONTAP password + Create K8s secret       | `resetONTAPUserPassword()` → `buildAndCreateSecretInSeed()`          |
+| ✅  | ✅        | ✅       | ❌         | ✅          | Create ONTAP user with existing K8s password   | `createONTAPUserWithPassword()`                                      |
+| ✅  | ✅        | ✅       | ✅         | ✅          | Validate password consistency                  | `validatePasswordConsistency()`                                      |
+| ✅  | ✅        | ✅       | ✅         | ❌          | Fix corrupted secret (empty password)          | `resetONTAPUserPassword()` → `updateSecretInSeed()`                  |
+
+### **Legend**
+
+- ✅ = Resource exists and is correct
+- ❌ = Resource missing or not functional
