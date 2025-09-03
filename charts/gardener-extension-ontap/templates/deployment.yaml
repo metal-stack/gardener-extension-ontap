@@ -20,7 +20,10 @@ spec:
         checksum/configmap-{{ include "name" . }}-config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         networking.gardener.cloud/to-runtime-apiserver: allowed
+        networking.gardener.cloud/to-dns: allowed
+        networking.gardener.cloud/to-public-networks: allowed
         networking.gardener.cloud/to-private-networks: allowed
+        networking.resources.gardener.cloud/to-all-shoots-kube-apiserver-tcp-443: allowed
 {{ include "labels" . | indent 8 }}
     spec:
       containers:
@@ -45,6 +48,9 @@ spec:
         {{- end }}
         - --log-level={{ .Values.logLevel | default "info" }}
         - --log-format={{ .Values.logFormat | default "json" }}
+        - --webhook-config-namespace={{ .Release.Namespace }}
+        - --webhook-config-server-port={{ tpl .Values.webhookConfig.serverPort . }}
+        - --disable-webhooks={{ .Values.disableWebhooks | join "," }}
         env:
         # TODO debug is used here to enforce the swagger client to dump request and response
         # - name: DEBUG
@@ -53,6 +59,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: WEBHOOK_CONFIG_NAMESPACE
+          value: {{ .Release.Namespace }}
         {{- if .Values.imageVectorOverwrite }}
         - name: IMAGEVECTOR_OVERWRITE
           value: /charts_overwrite/images_overwrite.yaml

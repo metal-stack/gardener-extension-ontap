@@ -211,6 +211,8 @@ spec:
 - Add monitoring and alerting for SVM health
 - Create proper cleanup and lifecycle management
 
+
+
 ## Creating ONTAP Encrypted Volumes
 
 To create an encrypted volume using NetApp Trident CSI, you need three components:
@@ -270,3 +272,22 @@ spec:
 - Secret name in StorageClass must match actual secret name
 - Secret namespace in StorageClass must match where secret is created
 - PVC must reference the StorageClass with encryption annotations
+
+
+## Webhook Implementation To do
+
+The mutating webhook is implemented to add `shoot.gardener.cloud/no-cleanup: "true"` annotations to Trident resources, preventing cleanup during shoot deletion.
+
+### Current Implementation Issues & Fixes
+
+**Problem**: Webhook wasn't triggered due to service name/certificate mismatch and missing namespace configuration.
+
+**Workaround**: 
+- Hardcoded webhook namespace in `pkg/trident/deploy_trident.go`
+- Created additional service with certificate-matching name
+- Deployed MutatingWebhookConfiguration as managed resource with URL + CA bundle
+
+**Proper Fix for Future**:
+- Fix service name to match certificate CN (`gardener-extension-extension-ontap`)
+- Ensure `WEBHOOK_CONFIG_NAMESPACE` is properly passed through webhook options
+- Use Gardener framework's built-in service reference instead of manual URL configuration (does this create the mutatingwebhook config by itself?)

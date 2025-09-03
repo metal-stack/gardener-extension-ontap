@@ -19,6 +19,8 @@ import (
 
 	controllercmd "github.com/gardener/gardener/extensions/pkg/controller/cmd"
 	"github.com/gardener/gardener/extensions/pkg/util"
+	webhookcmd "github.com/gardener/gardener/extensions/pkg/webhook/cmd"
+	genericactuator "github.com/gardener/gardener/extensions/pkg/controller/controlplane/genericactuator"
 	ghealth "github.com/gardener/gardener/pkg/healthz"
 	componentbaseconfig "k8s.io/component-base/config/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +42,7 @@ type Options struct {
 	healthOptions      *controllercmd.ControllerOptions
 	controllerSwitches *controllercmd.SwitchOptions
 	reconcileOptions   *controllercmd.ReconcilerOptions
+	webhookOptions     *webhookcmd.AddToManagerOptions
 	optionAggregator   controllercmd.OptionAggregator
 }
 
@@ -75,6 +78,16 @@ func NewOptions() *Options {
 		//Throws Panic
 		controllerSwitches: ontapcmd.ControllerSwitchOptions(),
 		reconcileOptions:   &controllercmd.ReconcilerOptions{IgnoreOperationAnnotation: true},
+		
+		webhookOptions: webhookcmd.NewAddToManagerOptions(
+			ExtensionName,
+			genericactuator.ShootWebhooksResourceName,
+			genericactuator.ShootWebhookNamespaceSelector("ontap"),
+			&webhookcmd.ServerOptions{
+				Namespace: os.Getenv("WEBHOOK_CONFIG_NAMESPACE"),
+			},
+			ontapcmd.WebhookSwitchOptions(),
+		),
 	}
 
 	options.optionAggregator = controllercmd.NewOptionAggregator(
@@ -87,6 +100,7 @@ func NewOptions() *Options {
 		controllercmd.PrefixOption("healthcheck-", options.healthOptions),
 		options.controllerSwitches,
 		options.reconcileOptions,
+		options.webhookOptions,
 	)
 
 	return options
@@ -154,6 +168,13 @@ func (options *Options) run(ctx context.Context) error {
 		return fmt.Errorf("could not add health check to manager: %w", err)
 	}
 	log.Info("added healthzcheck")
+
+	atomicShootWebhookConfig, err := options.webhookOptions.Completed().AddToManager(ctx, mgr, nil, false)
+	if err != nil {
+		return fmt.Errorf("could not add webhooks to manager: %w", err)
+	}
+	controller.DefaultAddOptions.ShootWebhookConfig = atomicShootWebhookConfig
+	controller.DefaultAddOptions.WebhookServerNamespace = options.webhookOptions.Server.Namespace
 
 	if err := mgr.Start(ctx); err != nil {
 		return fmt.Errorf("error running manager: %w", err)

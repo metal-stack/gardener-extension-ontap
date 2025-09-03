@@ -2,6 +2,7 @@ package ontap
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -32,25 +33,27 @@ import (
 // FIXME here the logic to deploy the trident operator
 
 type actuator struct {
-	ontap          *ontapv1.Ontap
-	client         client.Client
-	shootNamespace string
-	decoder        runtime.Decoder
-	config         config.ControllerConfiguration
+	ontap                  *ontapv1.Ontap
+	client                 client.Client
+	shootNamespace         string
+	decoder                runtime.Decoder
+	config                 config.ControllerConfiguration
+	webhookServerNamespace string
 }
 
 // NewActuator returns an actuator responsible for Extension resources.
-func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
+func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration, webhookServerNamespace string) (extension.Actuator, error) {
 	ontapClient, err := createAdminClient(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	return &actuator{
-		ontap:   ontapClient,
-		client:  mgr.GetClient(),
-		decoder: serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-		config:  config,
+		ontap:                  ontapClient,
+		client:                 mgr.GetClient(),
+		decoder:                serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
+		config:                 config,
+		webhookServerNamespace: webhookServerNamespace,
 	}, nil
 }
 
@@ -179,16 +182,23 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		ManagementLif: ontapConfig.SvmIpaddresses.ManagementLif,
 	}
 
-	tridentValues := trident.DeployTridentValues{
-		Namespace:      a.shootNamespace,
-		ProjectId:      projectId,
-		SeedsecretName: &seedsecretName,
-		SvmIpAddresses: svmIpAddresses,
-		Username:       string(username),
-		Password:       string(password),
-	}
-	err := trident.DeployTrident(ctx, log, a.client, tridentValues)
+	// Get the CA bundle for the webhook
+	webhookCABundle, err := a.getWebhookCABundle(ctx)
 	if err != nil {
+		return fmt.Errorf("failed to get webhook CA bundle: %w", err)
+	}
+
+	tridentValues := trident.DeployTridentValues{
+		Namespace:        a.shootNamespace,
+		ProjectId:        projectId,
+		SeedsecretName:   &seedsecretName,
+		SvmIpAddresses:   svmIpAddresses,
+		Username:         string(username),
+		Password:         string(password),
+		WebhookNamespace: "extension-ontap-6ns4l",
+		WebhookCABundle:  webhookCABundle,
+	}
+	if err := trident.DeployTrident(ctx, log, a.client, tridentValues); err != nil {
 		return err
 	}
 
@@ -246,4 +256,37 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, Svm
 	log.Info("SVM already exists, skipping creation", "projectId", projectId)
 
 	return nil
+}
+
+// getWebhookCABundle fetches the CA bundle from the webhook certificate secret
+func (a *actuator) getWebhookCABundle(ctx context.Context) (string, error) {
+	webhookNamespace := a.getWebhookServerNamespace()
+
+	secretList := &corev1.SecretList{}
+	err := a.client.List(ctx, secretList, client.InNamespace(webhookNamespace), client.MatchingLabels{})
+	if err != nil {
+		return "", fmt.Errorf("failed to list secrets in webhook namespace: %w", err)
+	}
+
+	for _, secret := range secretList.Items {
+		if strings.Contains(secret.Name, "webhook-bundle") {
+			if bundleData, ok := secret.Data["bundle.crt"]; ok {
+				return base64.StdEncoding.EncodeToString(bundleData), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("webhook CA bundle secret not found in namespace %s", webhookNamespace)
+}
+
+// getWebhookServerNamespace returns the webhook server namespace, using webhookServerNamespace if set, or finding it from the extension namespace
+func (a *actuator) getWebhookServerNamespace() string {
+	if a.webhookServerNamespace != "" {
+		return a.webhookServerNamespace
+	}
+
+	// Find the current extension namespace from the environment or use a pattern
+	// Since we know the pattern is extension-ontap-*, we can use that
+	// But for now this is hardcoded
+	return "extension-ontap-6ns4l"
 }

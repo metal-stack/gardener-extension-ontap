@@ -15,6 +15,10 @@ controllers:
   ignoreOperationAnnotation: false
 
 disableControllers: []
+disableWebhooks: []
+
+webhookConfig:
+  serverPort: "{{ index .Values.usablePorts 1 }}"
 
 # imageVectorOverwrite: |
 #   images:
@@ -45,3 +49,6 @@ config:
 
 gardener:
   version: ""
+
+usablePorts:
+- 443  # webhook server
