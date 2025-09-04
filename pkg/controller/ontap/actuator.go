@@ -2,7 +2,6 @@ package ontap
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
@@ -12,13 +11,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	runtimelog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
-	"github.com/metal-stack/ontap-go/api/client/cluster"
-	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 )
 
 // FIXME here the logic to deploy the trident operator
@@ -32,67 +28,13 @@ type actuator struct {
 
 // NewActuator returns an actuator responsible for Extension resources.
 func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
-	ontapClient, err := createAdminClient(ctx, config)
-	if err != nil {
-		return nil, err
-	}
 
 	return &actuator{
-		ontap:   ontapClient,
+		ontap:   nil,
 		client:  mgr.GetClient(),
 		decoder: serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
 		config:  config,
 	}, nil
-}
-
-func createAdminClient(ctx context.Context, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
-	err := config.Validate()
-	if err != nil {
-		return nil, err
-	}
-
-	var (
-		log          = runtimelog.Log.WithName(ControllerName)
-		ontapConfigs []ontapclient.Config
-	)
-
-	for _, cluster := range config.Clusters {
-		clusterClientConfig := ontapclient.Config{
-			AdminUser:     cluster.Username,
-			AdminPassword: cluster.Password,
-			Host:          cluster.IPAddress,
-			InsecureTLS:   true,
-		}
-
-		log.Info("adding cluster config", "cluster", cluster.Name, "user", cluster.Username, "ip", cluster.IPAddress)
-
-		ontapConfigs = append(ontapConfigs, clusterClientConfig)
-	}
-
-	metroClusterClient, err := ontapclient.NewMetroClusterClient(ontapConfigs)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get statistics of cluster, can be updated in the future to check the state or capacity to choose cluster for the client
-	for _, client := range *metroClusterClient {
-		cgparams := cluster.NewClusterGetParamsWithContext(ctx)
-		cgok, err := client.Cluster.ClusterGet(cgparams, nil)
-		if err != nil {
-			return nil, err
-		}
-		clusterResponse := cgok.Payload
-
-		log.Info("Successfully connected to ONTAP cluster", "cluster", *clusterResponse.Name, "statistics", *clusterResponse.Statistics)
-
-		// for now just return the first client
-		// TODO create logic to switch between clients
-		if *clusterResponse.Statistics.Status == "ok" {
-			return &client, nil
-		}
-	}
-
-	return nil, fmt.Errorf("couldn't initialize admin client")
 }
 
 // Reconcile handles extension creation and updates.
