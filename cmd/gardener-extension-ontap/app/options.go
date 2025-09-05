@@ -22,6 +22,7 @@ import (
 	webhookcmd "github.com/gardener/gardener/extensions/pkg/webhook/cmd"
 	genericactuator "github.com/gardener/gardener/extensions/pkg/controller/controlplane/genericactuator"
 	ghealth "github.com/gardener/gardener/pkg/healthz"
+	tridentv1 "github.com/netapp/trident/persistent_store/crd/apis/netapp/v1"
 	componentbaseconfig "k8s.io/component-base/config/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -146,6 +147,13 @@ func (options *Options) run(ctx context.Context) error {
 		return fmt.Errorf("could not add mgr-scheme to installation")
 	}
 	log.Info("added mgr-scheme to installation")
+
+	// Add Trident schema to manager scheme for webhook support
+	err = tridentv1.SchemeBuilder.AddToScheme(mgr.GetScheme())
+	if err != nil {
+		return fmt.Errorf("could not add Trident schema to manager: %w", err)
+	}
+	log.Info("added Trident schema to manager")
 
 	ctrlConfig := options.ontapOptions.Completed()
 	ctrlConfig.Apply(&controller.DefaultAddOptions.Config)

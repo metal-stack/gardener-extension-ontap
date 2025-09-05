@@ -1,5 +1,5 @@
 {{- define "name" -}}
-gardener-extension-ontap
+gardener-extension-extension-ontap
 {{- end -}}
 
 {{- define "labels.app.key" -}}

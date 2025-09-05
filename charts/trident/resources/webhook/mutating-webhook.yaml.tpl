@@ -12,13 +12,9 @@ webhooks:
     caBundle: {{ .CABundle }}
   rules:
   - operations: ["CREATE", "UPDATE"]
-    apiGroups: ["apps"]
+    apiGroups: ["trident.netapp.io"]
     apiVersions: ["v1"]
-    resources: ["deployments"]
-  - operations: ["CREATE", "UPDATE"]
-    apiGroups: [""]
-    apiVersions: ["v1"]
-    resources: ["pods"]
+    resources: ["*"]
   admissionReviewVersions: ["v1", "v1beta1"]
   sideEffects: None
-  failurePolicy: Fail
+  failurePolicy: Ignore

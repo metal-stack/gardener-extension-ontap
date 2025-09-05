@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
@@ -195,7 +196,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		SvmIpAddresses:   svmIpAddresses,
 		Username:         string(username),
 		Password:         string(password),
-		WebhookNamespace: "extension-ontap-6ns4l",
+		WebhookNamespace: a.getWebhookServerNamespace(),
 		WebhookCABundle:  webhookCABundle,
 	}
 	if err := trident.DeployTrident(ctx, log, a.client, tridentValues); err != nil {
@@ -285,8 +286,9 @@ func (a *actuator) getWebhookServerNamespace() string {
 		return a.webhookServerNamespace
 	}
 
-	// Find the current extension namespace from the environment or use a pattern
-	// Since we know the pattern is extension-ontap-*, we can use that
-	// But for now this is hardcoded
-	return "extension-ontap-6ns4l"
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return ns
+	}
+
+	return "extension-ontap"
 }
