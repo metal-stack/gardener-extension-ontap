@@ -12,9 +12,9 @@ webhooks:
     caBundle: {{ .CABundle }}
   rules:
   - operations: ["CREATE", "UPDATE"]
-    apiGroups: ["trident.netapp.io"]
+    apiGroups: ["apiextensions.k8s.io"]
     apiVersions: ["v1"]
-    resources: ["*"]
+    resources: ["customresourcedefinitions"]
   admissionReviewVersions: ["v1", "v1beta1"]
   sideEffects: None
   failurePolicy: Ignore

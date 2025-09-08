@@ -65,14 +65,14 @@ var (
 )
 
 type DeployTridentValues struct {
-	Namespace         string
-	ProjectId         string
-	SeedsecretName    *string
-	SvmIpAddresses    ontapv1alpha1.SvmIpaddresses
-	Username          string
-	Password          string
-	WebhookNamespace  string
-	WebhookCABundle   string
+	Namespace        string
+	ProjectId        string
+	SeedsecretName   *string
+	SvmIpAddresses   ontapv1alpha1.SvmIpaddresses
+	Username         string
+	Password         string
+	WebhookNamespace string
+	WebhookCABundle  string
 }
 
 type TridentResource struct {
@@ -167,7 +167,13 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			if err != nil {
 				return fmt.Errorf("failed to template webhook config for %s: %w", resource.Name, err)
 			}
-			yamlBytes["mutating-webhook.yaml"] = []byte(rendered)
+			resourceToDeploy := map[string][]byte{
+				"mutating-webhook.yaml": []byte(rendered),
+			}
+			if err := deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, resourceToDeploy, resource.WaitForHealthy); err != nil {
+				return err
+			}
+			continue
 		}
 
 		err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)

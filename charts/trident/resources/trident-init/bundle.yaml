@@ -436,6 +436,9 @@ metadata:
     app: operator.trident.netapp.io
   name: trident-operator
   namespace: kube-system
+  annotations:
+    shoot.gardener.cloud/no-cleanup: "true"
+    ontap.extensions.gardener.cloud/mutated-by-webhook: "true"
 spec:
   replicas: 1
   strategy:
@@ -505,6 +508,8 @@ apiVersion: trident.netapp.io/v1
 kind: TridentOrchestrator
 metadata:
   name: trident
+  annotations:
+    shoot.gardener.cloud/no-cleanup: "true"
 spec:
   namespace: kube-system
   enableForceDetach: false

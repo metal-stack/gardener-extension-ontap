@@ -18,7 +18,7 @@ disableControllers: []
 disableWebhooks: []
 
 webhookConfig:
-  serverPort: "{{ index .Values.usablePorts 0 }}"
+  serverPort: 443
 
 # imageVectorOverwrite: |
 #   images:

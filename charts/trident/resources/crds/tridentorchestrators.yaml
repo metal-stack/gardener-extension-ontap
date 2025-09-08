@@ -4,6 +4,8 @@ metadata:
   name: tridentorchestrators.trident.netapp.io
   labels:
     shoot.gardener.cloud/no-cleanup: "true"
+  annotations:
+    shoot.gardener.cloud/no-cleanup: "true"
 spec:
   group: trident.netapp.io
   versions:
