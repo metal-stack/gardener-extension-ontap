@@ -19,8 +19,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -158,7 +156,6 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			continue
 
 		case tridentWebhook:
-			// Template the webhook using Go templating
 			webhookConfig := webhook.Webhook{
 				WebhookNamespace: tridentValues.WebhookNamespace,
 				CABundle:         tridentValues.WebhookCABundle,
@@ -185,16 +182,9 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 }
 
 func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.Client, ex *extensionsv1alpha1.Extension) error {
-	// Phase 1: Clean up Trident-created resources with finalizers
-	if err := cleanupTridentResources(ctx, log, client); err != nil {
-		log.Error(err, "failed to cleanup Trident resources, continuing with managed resource deletion")
-		// Continue with deletion even if cleanup fails
-	}
-
 	resources := slices.Clone(tridentResources)
 	slices.Reverse(resources)
 
-	// Phase 2: Delete managed resources in reverse order
 	for _, resource := range tridentResources {
 		if err := managedresources.Delete(ctx, client, ex.Namespace, resource.Name, false); err != nil {
 			log.Error(err, "unable to delete managedresource", "resource", resource.Name)
@@ -287,179 +277,5 @@ func deployResources(
 	}
 
 	log.Info("successfully initiated deployment for managed resource", "name", resourceName)
-	return nil
-}
-
-// cleanupTridentResources deletes Trident-created resources with finalizers
-func cleanupTridentResources(ctx context.Context, log logr.Logger, k8sClient client.Client) error {
-	// List of Trident resource types that may have finalizers
-	tridentResources := []struct {
-		gvk    schema.GroupVersionKind
-		plural string
-	}{
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentActionMirrorUpdate",
-			},
-			plural: "tridentactionmirrorupdates",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentActionSnapshotRestore",
-			},
-			plural: "tridentactionsnapshotrestores",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentBackendConfig",
-			},
-			plural: "tridentbackendconfigs",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentBackend",
-			},
-			plural: "tridentbackends",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentConfigurator",
-			},
-			plural: "tridentconfigurators",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentMirrorRelationship",
-			},
-			plural: "tridentmirrorrelationships",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentNode",
-			},
-			plural: "tridentnodes",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentOrchestrator",
-			},
-			plural: "tridentorchestrators",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentSnapshotInfo",
-			},
-			plural: "tridentsnapshotinfos",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentSnapshot",
-			},
-			plural: "tridentsnapshots",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentStorageClass",
-			},
-			plural: "tridentstorageclasses",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentTransaction",
-			},
-			plural: "tridenttransactions",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentVersion",
-			},
-			plural: "tridentversions",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentVolumePublication",
-			},
-			plural: "tridentvolumepublications",
-		},
-		{
-			gvk: schema.GroupVersionKind{
-				Group:   "trident.netapp.io",
-				Version: "v1",
-				Kind:    "TridentVolumeReference",
-			},
-			plural: "tridentvolumereferences",
-		},
-	}
-
-	for _, resource := range tridentResources {
-		log.Info("cleaning up Trident resources", "type", resource.gvk.Kind)
-
-		list := &unstructured.UnstructuredList{}
-		list.SetGroupVersionKind(resource.gvk)
-
-		if err := k8sClient.List(ctx, list, client.InNamespace("kube-system")); err != nil {
-			log.Info("skipping resource type", "type", resource.gvk.Kind, "reason", err.Error())
-			return fmt.Errorf("failed to list %s: %w", resource.gvk.Kind, err)
-		}
-
-		// Delete each resource and remove finalizers if needed
-		for _, item := range list.Items {
-			log.Info("deleting resource", "kind", resource.gvk.Kind, "name", item.GetName())
-
-			// First try normal deletion
-			if err := k8sClient.Delete(ctx, &item); err != nil {
-				// Has to be tested, if it blocks,fails or how it behaves
-				// Actually have to trigger a delete before the finalizer gets added
-				log.Error(err, "failed to delete resource", "kind", resource.gvk.Kind, "name", item.GetName())
-			}
-
-			// Remove the finalizers
-			current := &unstructured.Unstructured{}
-			current.SetGroupVersionKind(resource.gvk)
-			err := k8sClient.Get(ctx, client.ObjectKey{
-				Namespace: item.GetNamespace(),
-				Name:      item.GetName(),
-			}, current)
-			if err != nil {
-				return err
-			}
-			if len(current.GetFinalizers()) > 0 {
-				log.Info("removing finalizers from resource", "kind", resource.gvk.Kind, "name", item.GetName())
-				current.SetFinalizers([]string{})
-				if err := k8sClient.Update(ctx, current); err != nil {
-					log.Error(err, "failed to remove finalizers", "kind", resource.gvk.Kind, "name", item.GetName())
-				}
-			}
-		}
-	}
-
 	return nil
 }
