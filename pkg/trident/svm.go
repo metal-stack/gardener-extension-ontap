@@ -204,11 +204,10 @@ func (m *SvnManager) getAllNodesInCluster(ctx context.Context) ([]string, error)
 		nodeUUIDs = append(nodeUUIDs, node.UUID.String())
 	}
 
-	// if len(nodeRecords) < 2 {
-	// 	// we want more than 1 node for metro a metro cluster setup
-	// 	return nil, fmt.Errorf("less than 2 nodes were returned for cluster %v,err: %w", nodeUUIDs, err)
-
-	// }
+	if len(nodeRecords) < 2 {
+		// we want more than 1 node for metro a metro cluster setup
+		return nil, fmt.Errorf("less than 2 nodes were returned for cluster %v,err: %w", nodeUUIDs, err)
+	}
 
 	return nodeUUIDs, nil
 }

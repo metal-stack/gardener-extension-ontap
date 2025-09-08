@@ -502,6 +502,65 @@ spec:
                       - linux
       serviceAccountName: trident-operator
 ---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ontap-csi-node
+  namespace: kube-system
+  labels:
+    node.gardener.cloud/critical-component: "true"
+spec:
+  selector:
+    matchLabels:
+      app: ontap-csi-plugin
+      role: node
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: ontap-csi-plugin
+        role: node
+        gardener.cloud/role: system-component
+        node.gardener.cloud/critical-component: "true"
+    spec:
+      priorityClassName: system-node-critical
+      serviceAccount: trident-operator
+      hostNetwork: true
+      initContainers:
+        - name: init-nvme-tcp
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - >-
+              [ -e /sys/module/nvme-tcp ] &&
+              modinfo nvme-tcp ||
+              { modinfo nvme-tcp && modprobe nvme-tcp ; } ||
+              { echo "FAILED to load nvme-tcp kernel driver" && exit 1 ; }
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: modules-dir
+              mountPath: /lib/modules
+              mountPropagation: HostToContainer
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+      volumes:
+        - name: modules-dir
+          hostPath:
+            path: /lib/modules
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+        - key: CriticalAddonsOnly
+          operator: Exists
+---
 apiVersion: trident.netapp.io/v1
 kind: TridentOrchestrator
 metadata:
@@ -526,62 +585,3 @@ spec:
   enableAutoBackendConfig: true
   iscsiSelfHealingInterval: "5m0s"
   iscsiSelfHealingWaitTime: "7m0s"
----
-# apiVersion: apps/v1
-# kind: DaemonSet
-# metadata:
-#   name: ontap-csi-node
-#   namespace: kube-system
-# labels:
-#   node.gardener.cloud/critical-component: "true"
-# spec:
-#   selector:
-#     matchLabels:
-#       app: ontap-csi-plugin
-#       role: node
-#   updateStrategy:
-#     type: RollingUpdate
-#     rollingUpdate:
-#       maxUnavailable: 1
-#   template:
-#     metadata:
-#       labels:
-#         app: ontap-csi-plugin
-#         role: node
-#         gardener.cloud/role: system-component
-#         node.gardener.cloud/critical-component: "true"
-#     spec:
-#       priorityClassName: system-node-critical
-#       serviceAccount: trident-operator
-#       hostNetwork: true
-#       initContainers:
-#         - name: init-nvme-tcp
-#           image: busybox:1.36
-#           command:
-#             - /bin/sh
-#             - -c
-#             - >-
-#               [ -e /sys/module/nvme-tcp ] &&
-#               modinfo nvme-tcp ||
-#               { modinfo nvme-tcp && modprobe nvme-tcp ; } ||
-#               { echo "FAILED to load nvme-tcp kernel driver" && exit 1 ; }
-#           securityContext:
-#             privileged: true
-#           volumeMounts:
-#             - name: modules-dir
-#               mountPath: /lib/modules
-#               mountPropagation: HostToContainer
-#       containers:
-#         - name: pause
-#           image: registry.k8s.io/pause:3.10
-#       volumes:
-#         - name: modules-dir
-#           hostPath:
-#             path: /lib/modules
-#       tolerations:
-#         - effect: NoSchedule
-#           operator: Exists
-#         - effect: NoExecute
-#           operator: Exists
-#         - key: CriticalAddonsOnly
-#           operator: Exists
