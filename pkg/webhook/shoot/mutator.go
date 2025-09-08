@@ -48,17 +48,17 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 	}
 
 	extensionswebhook.LogMutation(m.logger, gvk.Kind, new.GetNamespace(), new.GetName())
-	return m.mutateObjectAnnotations(ctx, new)
+	return m.mutateObjectLabels(ctx, new)
 }
 
-// mutateObjectAnnotations adds annotations to the given object
-func (m *mutator) mutateObjectAnnotations(_ context.Context, obj client.Object) error {
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
+// mutateObjectLabels adds labels to the given object
+func (m *mutator) mutateObjectLabels(_ context.Context, obj client.Object) error {
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
 	}
-	annotations["shoot.gardener.cloud/no-cleanup"] = "true"
-	annotations["ontap.extensions.gardener.cloud/mutated-by-webhook"] = "true"
-	obj.SetAnnotations(annotations)
+	labels["shoot.gardener.cloud/no-cleanup"] = "true"
+	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = "true"
+	obj.SetLabels(labels)
 	return nil
 }

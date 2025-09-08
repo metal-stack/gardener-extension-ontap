@@ -3,7 +3,7 @@ kind: TridentBackendConfig
 metadata:
   name: ontap-${PROJECT_ID}-backend
   namespace: kube-system
-  annotations:
+  labels:
     shoot.gardener.cloud/no-cleanup: "true"
 spec:
   version: 1

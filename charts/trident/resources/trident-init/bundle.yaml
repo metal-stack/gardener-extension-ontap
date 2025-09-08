@@ -434,11 +434,9 @@ kind: Deployment
 metadata:
   labels:
     app: operator.trident.netapp.io
+    shoot.gardener.cloud/no-cleanup: "true"
   name: trident-operator
   namespace: kube-system
-  annotations:
-    shoot.gardener.cloud/no-cleanup: "true"
-    ontap.extensions.gardener.cloud/mutated-by-webhook: "true"
 spec:
   replicas: 1
   strategy:
@@ -508,7 +506,7 @@ apiVersion: trident.netapp.io/v1
 kind: TridentOrchestrator
 metadata:
   name: trident
-  annotations:
+  labels:
     shoot.gardener.cloud/no-cleanup: "true"
 spec:
   namespace: kube-system
