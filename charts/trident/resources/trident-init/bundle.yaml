@@ -458,9 +458,9 @@ spec:
         networking.resources.gardener.cloud/to-runtime-apiserver-allowed-ports: '[{"protocol":"TCP","port":443}]'
         networking.resources.gardener.cloud/to-apiserver-allowed-ports: '[{"protocol":"TCP","port":443}]'
     spec:
-    # locally the trident operator cant reacht he api-server for some reason, used to work before 
-      hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+    # locally the trident operator cant reacht he api-server for some reason, used to work before
+      # hostNetwork: true
+      # dnsPolicy: ClusterFirstWithHostNet
       containers:
         - command:
             - /trident-operator
