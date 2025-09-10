@@ -2,13 +2,16 @@ package ontap
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
+	"sync/atomic"
 
+	extensionscontroller "github.com/gardener/gardener/extensions/pkg/controller"
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
+	"github.com/gardener/gardener/extensions/pkg/webhook"
+
+	"github.com/gardener/gardener/extensions/pkg/webhook/shoot"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -34,27 +37,29 @@ import (
 // FIXME here the logic to deploy the trident operator
 
 type actuator struct {
-	ontap                  *ontapv1.Ontap
-	client                 client.Client
-	shootNamespace         string
-	decoder                runtime.Decoder
-	config                 config.ControllerConfiguration
-	webhookServerNamespace string
+	ontap              *ontapv1.Ontap
+	client             client.Client
+	shootNamespace     string
+	decoder            runtime.Decoder
+	config             config.ControllerConfiguration
+	shootWebhookConfig *atomic.Value
 }
 
+const ShootWebhooksResourceName = "extension-ontap-shoot"
+
 // NewActuator returns an actuator responsible for Extension resources.
-func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration, webhookServerNamespace string) (extension.Actuator, error) {
+func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration, shootWebhookConfig *atomic.Value) (extension.Actuator, error) {
 	ontapClient, err := createAdminClient(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	return &actuator{
-		ontap:                  ontapClient,
-		client:                 mgr.GetClient(),
-		decoder:                serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-		config:                 config,
-		webhookServerNamespace: webhookServerNamespace,
+		ontap:              ontapClient,
+		client:             mgr.GetClient(),
+		decoder:            serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
+		config:             config,
+		shootWebhookConfig: shootWebhookConfig,
 	}, nil
 }
 
@@ -183,28 +188,29 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		ManagementLif: ontapConfig.SvmIpaddresses.ManagementLif,
 	}
 
-	// Get the CA bundle for the webhook
-	webhookCABundle, err := a.getWebhookCABundle(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get webhook CA bundle: %w", err)
-	}
-
 	tridentValues := trident.DeployTridentValues{
-		Namespace:        a.shootNamespace,
-		ProjectId:        projectId,
-		SeedsecretName:   &seedsecretName,
-		SvmIpAddresses:   svmIpAddresses,
-		Username:         string(username),
-		Password:         string(password),
-		WebhookNamespace: a.getWebhookServerNamespace(),
-		WebhookCABundle:  webhookCABundle,
+		Namespace:      a.shootNamespace,
+		ProjectId:      projectId,
+		SeedsecretName: &seedsecretName,
+		SvmIpAddresses: svmIpAddresses,
+		Username:       string(username),
+		Password:       string(password),
 	}
 	if err := trident.DeployTrident(ctx, log, a.client, tridentValues); err != nil {
 		return err
 	}
 
-	log.Info("ONTAP extension reconciliation completed successfully")
+	clusterd, err := extensionscontroller.GetCluster(ctx, a.client, ex.Namespace)
+	if client.IgnoreNotFound(err) != nil {
+		return err
+	}
 
+	err = a.reconcileShootWebhookConfig(ctx, clusterd)
+	if err != nil {
+		return err
+	}
+
+	log.Info("ONTAP extension reconciliation completed successfully")
 	return nil
 }
 
@@ -259,36 +265,16 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, Svm
 	return nil
 }
 
-// getWebhookCABundle fetches the CA bundle from the webhook certificate secret
-func (a *actuator) getWebhookCABundle(ctx context.Context) (string, error) {
-	webhookNamespace := a.getWebhookServerNamespace()
-
-	secretList := &corev1.SecretList{}
-	err := a.client.List(ctx, secretList, client.InNamespace(webhookNamespace), client.MatchingLabels{})
-	if err != nil {
-		return "", fmt.Errorf("failed to list secrets in webhook namespace: %w", err)
+func (a *actuator) reconcileShootWebhookConfig(ctx context.Context, cluster *extensionscontroller.Cluster) error {
+	value := a.shootWebhookConfig.Load()
+	webhookConfig, ok := value.(*webhook.Configs)
+	if !ok {
+		return fmt.Errorf("expected *webhook.Configs, got %T", value)
 	}
 
-	for _, secret := range secretList.Items {
-		if strings.Contains(secret.Name, "webhook-bundle") {
-			if bundleData, ok := secret.Data["bundle.crt"]; ok {
-				return base64.StdEncoding.EncodeToString(bundleData), nil
-			}
-		}
+	if err := shoot.ReconcileWebhookConfig(ctx, a.client, cluster.ObjectMeta.Name, ShootWebhooksResourceName, *webhookConfig, cluster, true); err != nil {
+		return fmt.Errorf("could not reconcile shoot webhooks: %w", err)
 	}
 
-	return "", fmt.Errorf("webhook CA bundle secret not found in namespace %s", webhookNamespace)
-}
-
-// getWebhookServerNamespace returns the webhook server namespace, using webhookServerNamespace if set, or finding it from the extension namespace
-func (a *actuator) getWebhookServerNamespace() string {
-	if a.webhookServerNamespace != "" {
-		return a.webhookServerNamespace
-	}
-
-	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
-		return ns
-	}
-
-	return "extension-ontap"
+	return nil
 }

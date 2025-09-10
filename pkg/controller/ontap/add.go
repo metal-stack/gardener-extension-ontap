@@ -2,6 +2,7 @@ package ontap
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -36,10 +37,8 @@ type AddOptions struct {
 	IgnoreOperationAnnotation bool
 	// ExtensionClass defines the extension class this extension is responsible for.
 	ExtensionClass extensionsv1alpha1.ExtensionClass
-	// ShootWebhookConfig is the atomic configuration for the shoot webhooks.
-	ShootWebhookConfig interface{} // will be the actual webhook config type
-	// WebhookServerNamespace is the namespace where the webhook server runs.
-	WebhookServerNamespace string
+	// ShootWebhookConfig holds the current Shoot webhook configuration.
+	ShootWebhookConfig *atomic.Value
 }
 
 // AddToManager adds a controller with the default Options to the given Controller Manager.
@@ -50,7 +49,7 @@ func AddToManager(ctx context.Context, mgr manager.Manager) error {
 // AddToManagerWithOptions adds a controller with the given Options to the given manager.
 // The opts.Reconciler is being set with a newly instantiated actuator.
 func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddOptions) error {
-	actuator, err := NewActuator(ctx, mgr, opts.Config, opts.WebhookServerNamespace)
+	actuator, err := NewActuator(ctx, mgr, opts.Config, opts.ShootWebhookConfig)
 	if err != nil {
 		return err
 	}

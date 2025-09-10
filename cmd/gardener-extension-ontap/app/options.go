@@ -154,6 +154,12 @@ func (options *Options) run(ctx context.Context) error {
 	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation, pointer.Pointer(extensionsv1alpha1.ExtensionClassShoot))
 	options.heartbeatOptions.Completed().Apply(&heartbeatcontroller.DefaultAddOptions)
 
+	atomicShootWebhookConfig, err := options.webhookOptions.Completed().AddToManager(ctx, mgr, nil, false)
+	if err != nil {
+		return fmt.Errorf("could not add webhooks to manager: %w", err)
+	}
+	controller.DefaultAddOptions.ShootWebhookConfig = atomicShootWebhookConfig
+
 	if err := options.controllerSwitches.Completed().AddToManager(ctx, mgr); err != nil {
 		return fmt.Errorf("could not add controllers to manager: %w", err)
 	}
@@ -168,13 +174,6 @@ func (options *Options) run(ctx context.Context) error {
 		return fmt.Errorf("could not add health check to manager: %w", err)
 	}
 	log.Info("added healthzcheck")
-
-	atomicShootWebhookConfig, err := options.webhookOptions.Completed().AddToManager(ctx, mgr, nil, false)
-	if err != nil {
-		return fmt.Errorf("could not add webhooks to manager: %w", err)
-	}
-	controller.DefaultAddOptions.ShootWebhookConfig = atomicShootWebhookConfig
-	controller.DefaultAddOptions.WebhookServerNamespace = options.webhookOptions.Server.Namespace
 
 	if err := mgr.Start(ctx); err != nil {
 		return fmt.Errorf("error running manager: %w", err)

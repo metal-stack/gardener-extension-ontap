@@ -14,7 +14,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/charts/trident/resources/cwnps"
 	"github.com/metal-stack/gardener-extension-ontap/charts/trident/resources/secrets"
-	"github.com/metal-stack/gardener-extension-ontap/charts/trident/resources/webhook"
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -36,7 +35,6 @@ const (
 	tridentBackendsMR      string = "trident-backends"
 	tridentSvmSecret       string = "trident-svm-secret"
 	tridentCwnp            string = "trident-cwnp"
-	tridentWebhook         string = "trident-webhook"
 	svmSeedSecretNamespace string = "kube-system"
 
 	defaultChartPath = "charts/trident"
@@ -50,15 +48,12 @@ var (
 	backendPath     = filepath.Join(resourcesPath, "backends")
 	svmSecretsPath  = filepath.Join(resourcesPath, "secrets")
 	cwnpPath        = filepath.Join(resourcesPath, "cwnps")
-	webhookPath     = filepath.Join(resourcesPath, "webhook")
 
 	tridentResources = []TridentResource{
 		{Name: tridentInitMR, Path: tridentInitPath, WaitForHealthy: false},
 		{Name: tridentCRDsName, Path: crdPath, WaitForHealthy: true},
 		{Name: tridentBackendsMR, Path: backendPath, WaitForHealthy: false},
 		{Name: tridentSvmSecret, Path: svmSecretsPath, WaitForHealthy: false},
-		{Name: tridentCwnp, Path: cwnpPath, WaitForHealthy: false},
-		{Name: tridentWebhook, Path: webhookPath, WaitForHealthy: false},
 	}
 )
 
@@ -155,22 +150,6 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			}
 			continue
 
-		case tridentWebhook:
-			webhookConfig := webhook.Webhook{
-				WebhookNamespace: tridentValues.WebhookNamespace,
-				CABundle:         tridentValues.WebhookCABundle,
-			}
-			rendered, err := webhook.Parse(webhookConfig)
-			if err != nil {
-				return fmt.Errorf("failed to template webhook config for %s: %w", resource.Name, err)
-			}
-			resourceToDeploy := map[string][]byte{
-				"mutating-webhook.yaml": []byte(rendered),
-			}
-			if err := deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, resourceToDeploy, resource.WaitForHealthy); err != nil {
-				return err
-			}
-			continue
 		}
 
 		err = deployResources(ctx, log, k8sClient, tridentValues.Namespace, resource.Name, yamlBytes, resource.WaitForHealthy)
