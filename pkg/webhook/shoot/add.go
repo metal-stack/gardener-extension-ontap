@@ -3,6 +3,7 @@ package shoot
 import (
 	extensionswebhook "github.com/gardener/gardener/extensions/pkg/webhook"
 	"github.com/gardener/gardener/extensions/pkg/webhook/shoot"
+	appsv1 "k8s.io/api/apps/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -55,6 +56,14 @@ func AddToManagerWithOptions(mgr manager.Manager, opts AddOptions) (*extensionsw
 	for _, crd := range tridentTypes {
 		types = append(types, extensionswebhook.Type{Obj: crd})
 	}
+
+	tridentDaemonSet := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "trident-node-linux",
+			Namespace: "kube-system",
+		},
+	}
+	types = append(types, extensionswebhook.Type{Obj: tridentDaemonSet})
 
 	return shoot.New(mgr, shoot.Args{
 		Types:   types,
