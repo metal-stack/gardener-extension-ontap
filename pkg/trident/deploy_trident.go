@@ -24,18 +24,15 @@ import (
 // Constants for paths and names
 const (
 	// Constants for directory names
-	storageClassFilename   = "storageclass.yaml"
 	backendConfigFilename  = "backend-config.yaml"
 	svmShootSecretFilename = "svm-shoot-secret.yaml"
 	cwnpFileName           = "cwnp.yaml"
 
-	//Why hardcod
-	tridentCRDsName        string = "trident-crds"
-	tridentInitMR          string = "trident-init"
-	tridentBackendsMR      string = "trident-backends"
-	tridentSvmSecret       string = "trident-svm-secret"
-	tridentCwnp            string = "trident-cwnp"
-	svmSeedSecretNamespace string = "kube-system"
+	tridentCRDsName   string = "trident-crds"
+	tridentInitMR     string = "trident-init"
+	tridentBackendsMR string = "trident-backends"
+	tridentSvmSecret  string = "trident-svm-secret"
+	tridentCwnp       string = "trident-cwnp"
 
 	defaultChartPath = "charts/trident"
 )
