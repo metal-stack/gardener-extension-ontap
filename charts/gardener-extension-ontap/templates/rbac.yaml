@@ -75,6 +75,9 @@ rules:
   - patch
 - apiGroups:
   - coordination.k8s.io
+  resourceNames:
+  - extension-ontap-leader-election
+  - gardener-extension-heartbeat
   resources:
   - leases
   verbs:
@@ -82,14 +85,7 @@ rules:
   - update
   - list
   - watch
-- apiGroups:
-  - coordination.k8s.io
-  resources:
-  - leases
-  resourceNames:
-  - extension-ontap-leader-election
-  verbs:
-  - update
+  - patch
   - get
 - apiGroups:
   - ""

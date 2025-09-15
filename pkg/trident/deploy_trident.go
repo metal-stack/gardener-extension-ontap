@@ -54,6 +54,7 @@ var (
 		{Name: tridentCRDsName, Path: crdPath, WaitForHealthy: true},
 		{Name: tridentBackendsMR, Path: backendPath, WaitForHealthy: false},
 		{Name: tridentSvmSecret, Path: svmSecretsPath, WaitForHealthy: false},
+		{Name: tridentCwnp, Path: cwnpPath, WaitForHealthy: false},
 	}
 )
 

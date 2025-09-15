@@ -2,9 +2,11 @@ package shoot
 
 import (
 	"context"
+	"strconv"
 
 	extensionswebhook "github.com/gardener/gardener/extensions/pkg/webhook"
 
+	"github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -66,27 +68,14 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 	return nil
 }
 
-// mutateObjectLabels adds labels to the given object
-func (m *mutator) mutateObjectLabels(_ context.Context, obj client.Object) error {
-	labels := obj.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
-	}
-
-	labels["shoot.gardener.cloud/no-cleanup"] = "true"
-	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = "true"
-	obj.SetLabels(labels)
-	return nil
-}
-
 // mutateTridentNodeDaemonSet adds the CSI node readiness annotation to Trident node DaemonSet pods
 func (m *mutator) mutateTridentNodeDaemonSet(_ context.Context, daemonset *appsv1.DaemonSet) error {
 	labels := daemonset.GetLabels()
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	labels["node.gardener.cloud/critical-component"] = "true"
-	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = "true"
+	labels[constants.LabelNodeCriticalComponent] = strconv.FormatBool(true)
+	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = strconv.FormatBool(true)
 	daemonset.SetLabels(labels)
 
 	annotations := daemonset.GetAnnotations()
@@ -106,26 +95,26 @@ func (m *mutator) mutateTridentCRD(_ context.Context, obj client.Object) error {
 		labels = make(map[string]string)
 	}
 
-	labels["shoot.gardener.cloud/no-cleanup"] = "true"
-	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = "true"
+	labels[constants.ShootNoCleanup] = strconv.FormatBool(true)
+	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = strconv.FormatBool(true)
 	obj.SetLabels(labels)
 
-	// Remove trident finalizer to allow proper deletion during shoot cleanup
-	finalizers := obj.GetFinalizers()
-	var updatedFinalizers []string
-	tridentFinalizerFound := false
+	// // Remove trident finalizer to allow proper deletion during shoot cleanup
+	// finalizers := obj.GetFinalizers()
+	// var updatedFinalizers []string
+	// tridentFinalizerFound := false
 
-	for _, finalizer := range finalizers {
-		if finalizer == "trident.netapp.io" {
-			tridentFinalizerFound = true
-			continue
-		}
-		updatedFinalizers = append(updatedFinalizers, finalizer)
-	}
+	// for _, finalizer := range finalizers {
+	// 	if finalizer == "trident.netapp.io" {
+	// 		tridentFinalizerFound = true
+	// 		continue
+	// 	}
+	// 	updatedFinalizers = append(updatedFinalizers, finalizer)
+	// }
 
-	if tridentFinalizerFound {
-		obj.SetFinalizers(updatedFinalizers)
-	}
+	// if tridentFinalizerFound {
+	// 	obj.SetFinalizers(updatedFinalizers)
+	// }
 
 	return nil
 }
