@@ -1,9 +1,29 @@
+---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: ontap-gold
+  labels:
+    shoot.gardener.cloud/no-cleanup: "true"
 provisioner: csi.trident.netapp.io
 parameters:
   backendType: "ontap-san"
-  provisioningType: "thick"
+  provisioningType: "thin"
   selector: "luks=false"
+  fsType: "ext4"
+allowVolumeExpansion: true
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ontap-encrypted
+provisioner: csi.trident.netapp.io
+parameters:
+  backendType: "ontap-san"
+  provisioningType: "thin"
+  selector: "luks=true"
+  fsType: "ext4"
+  csi.storage.k8s.io/node-stage-secret-name: storage-encryption-key
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
+allowVolumeExpansion: true
