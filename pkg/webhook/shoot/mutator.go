@@ -47,7 +47,7 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		}
 
 		extensionswebhook.LogMutation(m.logger, gvk.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, new)
+		return m.mutateTridentCRD(ctx, new)
 	}
 
 	if gvk.Kind == "DaemonSet" {
@@ -72,6 +72,7 @@ func (m *mutator) mutateObjectLabels(_ context.Context, obj client.Object) error
 	if labels == nil {
 		labels = make(map[string]string)
 	}
+
 	labels["shoot.gardener.cloud/no-cleanup"] = "true"
 	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = "true"
 	obj.SetLabels(labels)
@@ -94,6 +95,37 @@ func (m *mutator) mutateTridentNodeDaemonSet(_ context.Context, daemonset *appsv
 	}
 	annotations["node.gardener.cloud/wait-for-csi-node-ontap"] = "csi.trident.netapp.io"
 	daemonset.SetAnnotations(annotations)
+
+	return nil
+}
+
+// mutateTridentCRD adds labels and removes trident finalizer from Trident CRDs
+func (m *mutator) mutateTridentCRD(_ context.Context, obj client.Object) error {
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+
+	labels["shoot.gardener.cloud/no-cleanup"] = "true"
+	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = "true"
+	obj.SetLabels(labels)
+
+	// Remove trident finalizer to allow proper deletion during shoot cleanup
+	finalizers := obj.GetFinalizers()
+	var updatedFinalizers []string
+	tridentFinalizerFound := false
+
+	for _, finalizer := range finalizers {
+		if finalizer == "trident.netapp.io" {
+			tridentFinalizerFound = true
+			continue
+		}
+		updatedFinalizers = append(updatedFinalizers, finalizer)
+	}
+
+	if tridentFinalizerFound {
+		obj.SetFinalizers(updatedFinalizers)
+	}
 
 	return nil
 }

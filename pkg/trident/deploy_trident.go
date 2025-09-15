@@ -172,6 +172,13 @@ func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.
 		log.Info("managedresource deleted successfully", "resource", resource.Name)
 	}
 
+	// Delete webhook ManagedResource as the last step to prevent it from re-adding finalizers
+	if err := managedresources.Delete(ctx, client, ex.Namespace, "extension-ontap-shoot", false); err != nil {
+		log.Error(err, "unable to delete webhook managedresource", "resource", "extension-ontap-shoot")
+		return err
+	}
+	log.Info("webhook managedresource deleted successfully", "resource", "extension-ontap-shoot")
+
 	log.Info("all managed resources successfully deleted.")
 
 	return nil
