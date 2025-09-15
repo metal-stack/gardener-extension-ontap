@@ -2,14 +2,16 @@ package shoot
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	extensionswebhook "github.com/gardener/gardener/extensions/pkg/webhook"
 
-	"github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
+	v1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,6 +25,8 @@ type mutator struct {
 	logger  logr.Logger
 }
 
+const mutatedByOntap = "ontap.extensions.gardener.cloud/mutated-by-webhook"
+
 // NewMutator creates a new Mutator that mutates resources in the shoot cluster.
 func NewMutator(mgr manager.Manager) extensionswebhook.Mutator {
 	return &mutator{
@@ -33,88 +37,62 @@ func NewMutator(mgr manager.Manager) extensionswebhook.Mutator {
 }
 
 func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
-	if new == nil {
+	acc, err := meta.Accessor(new)
+	if err != nil {
+		return fmt.Errorf("could not create accessor during webhook %w", err)
+	}
+
+	tridentCRDs := map[string]bool{
+		"tridentactionmirrorupdates.trident.netapp.io":    true,
+		"tridentactionsnapshotrestores.trident.netapp.io": true,
+		"tridentbackendconfigs.trident.netapp.io":         true,
+		"tridentbackends.trident.netapp.io":               true,
+		"tridentmirrorrelationships.trident.netapp.io":    true,
+		"tridentnodes.trident.netapp.io":                  true,
+		"tridentsnapshotinfos.trident.netapp.io":          true,
+		"tridentsnapshots.trident.netapp.io":              true,
+		"tridentstorageclasses.trident.netapp.io":         true,
+		"tridenttransactions.trident.netapp.io":           true,
+		"tridentversions.trident.netapp.io":               true,
+		"tridentvolumepublications.trident.netapp.io":     true,
+		"tridentvolumereferences.trident.netapp.io":       true,
+		"tridentvolumes.trident.netapp.io":                true,
+	}
+
+	// If the object does have a deletion timestamp then we don't want to mutate anything.
+	if acc.GetDeletionTimestamp() != nil {
 		return nil
 	}
 
-	gvk := new.GetObjectKind().GroupVersionKind()
-
-	if gvk.Kind == "CustomResourceDefinition" {
-		crd, ok := new.(*apiextensionsv1.CustomResourceDefinition)
-		if !ok {
+	switch x := new.(type) {
+	case *apiextensionsv1.CustomResourceDefinition:
+		if tridentCRDs[x.Name] {
+			extensionswebhook.LogMutation(m.logger, x.Kind, x.Namespace, x.Name)
+			return m.mutateObjectLabels(ctx, x, false)
+		}
+	case *appsv1.DaemonSet:
+		if x.Name != "trident-node-linux" || x.Namespace != "kube-system" {
 			return nil
 		}
-		if crd.Spec.Group != "trident.netapp.io" {
-			return nil
-		}
-
-		extensionswebhook.LogMutation(m.logger, gvk.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateTridentCRD(ctx, new)
-	}
-
-	if gvk.Kind == "DaemonSet" {
-		daemonset, ok := new.(*appsv1.DaemonSet)
-		if !ok {
-			return nil
-		}
-		if daemonset.Name != "trident-node-linux" || daemonset.Namespace != "kube-system" {
-			return nil
-		}
-
-		extensionswebhook.LogMutation(m.logger, gvk.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateTridentNodeDaemonSet(ctx, daemonset)
+		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
+		return m.mutateObjectLabels(ctx, x, true)
 	}
 
 	return nil
 }
 
-// mutateTridentNodeDaemonSet adds the CSI node readiness annotation to Trident node DaemonSet pods
-func (m *mutator) mutateTridentNodeDaemonSet(_ context.Context, daemonset *appsv1.DaemonSet) error {
-	labels := daemonset.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
-	}
-	labels[constants.LabelNodeCriticalComponent] = strconv.FormatBool(true)
-	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = strconv.FormatBool(true)
-	daemonset.SetLabels(labels)
-
-	annotations := daemonset.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
-	annotations["node.gardener.cloud/wait-for-csi-node-ontap"] = "csi.trident.netapp.io"
-	daemonset.SetAnnotations(annotations)
-
-	return nil
-}
-
-// mutateTridentCRD adds labels and removes trident finalizer from Trident CRDs
-func (m *mutator) mutateTridentCRD(_ context.Context, obj client.Object) error {
+// mutateObjectLabels adds labels to the given object
+func (m *mutator) mutateObjectLabels(_ context.Context, obj client.Object, criticalLabel bool) error {
 	labels := obj.GetLabels()
 	if labels == nil {
 		labels = make(map[string]string)
 	}
 
-	labels[constants.ShootNoCleanup] = strconv.FormatBool(true)
-	labels["ontap.extensions.gardener.cloud/mutated-by-webhook"] = strconv.FormatBool(true)
+	labels[v1beta1constants.ShootNoCleanup] = strconv.FormatBool(true)
+	labels[mutatedByOntap] = strconv.FormatBool(true)
+	if criticalLabel {
+		labels[v1beta1constants.LabelNodeCriticalComponent] = strconv.FormatBool(true)
+	}
 	obj.SetLabels(labels)
-
-	// // Remove trident finalizer to allow proper deletion during shoot cleanup
-	// finalizers := obj.GetFinalizers()
-	// var updatedFinalizers []string
-	// tridentFinalizerFound := false
-
-	// for _, finalizer := range finalizers {
-	// 	if finalizer == "trident.netapp.io" {
-	// 		tridentFinalizerFound = true
-	// 		continue
-	// 	}
-	// 	updatedFinalizers = append(updatedFinalizers, finalizer)
-	// }
-
-	// if tridentFinalizerFound {
-	// 	obj.SetFinalizers(updatedFinalizers)
-	// }
-
 	return nil
 }
