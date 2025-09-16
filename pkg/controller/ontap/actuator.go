@@ -240,7 +240,7 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, Svm
 
 	_, err := svnManager.GetSVMByName(ctx, projectId)
 	if err != nil {
-		if errors.Is(err, trident.ErrNotFound) {
+		if errors.Is(err, trident.ErrSvmNotFound) {
 			log.Info("SVM not found, proceeding with creation", "projectId", projectId)
 
 			svmOpts := trident.CreateSVMOptions{

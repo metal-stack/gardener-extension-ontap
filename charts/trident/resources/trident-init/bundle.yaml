@@ -472,7 +472,7 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: trident-operator
-          image: netapp/trident-operator:25.02.0
+          image: netapp/trident-operator:25.06.1
           imagePullPolicy: IfNotPresent
           name: trident-operator
           resources:
@@ -548,6 +548,7 @@ spec:
               mountPropagation: HostToContainer
       containers:
         - name: pause
+          image: registry.k8s.io/pause:3.10
           image: registry.k8s.io/pause:3.10
       volumes:
         - name: modules-dir

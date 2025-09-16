@@ -12,6 +12,7 @@ require (
 	github.com/go-openapi/strfmt v0.23.0
 	github.com/golang/mock v1.6.0
 	github.com/google/go-cmp v0.7.0
+	github.com/google/go-cmp v0.7.0
 	github.com/metal-stack/metal-lib v0.23.2
 	github.com/metal-stack/ontap-go v0.1.0
 	github.com/onsi/ginkgo v1.16.5
