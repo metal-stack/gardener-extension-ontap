@@ -177,10 +177,8 @@ func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.
 		log.Error(err, "unable to delete webhook managedresource", "resource", "extension-ontap-shoot")
 		return err
 	}
-	log.Info("webhook managedresource deleted successfully", "resource", "extension-ontap-shoot")
 
 	log.Info("all managed resources successfully deleted.")
-
 	return nil
 }
 
