@@ -128,7 +128,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 			if err != nil {
 				if errors.IsNotFound(err) {
 					log.Info("firewall ns doesn't exist, not deploying cwnps")
-					break
+					continue
 				}
 				return err
 			}
