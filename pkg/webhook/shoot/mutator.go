@@ -9,6 +9,7 @@ import (
 
 	v1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -70,6 +71,12 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 			extensionswebhook.LogMutation(m.logger, x.Kind, x.Namespace, x.Name)
 			return m.mutateObjectLabels(ctx, x, false)
 		}
+	case *appsv1.DaemonSet:
+		if x.Name != "trident-node-linux" || x.Namespace != "kube-system" {
+			return nil
+		}
+		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
+		return m.mutateObjectLabels(ctx, x, true)
 	}
 
 	return nil
