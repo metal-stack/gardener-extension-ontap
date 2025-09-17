@@ -99,5 +99,6 @@ func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string
 	if criticalLabel {
 		labels[v1beta1constants.LabelNodeCriticalComponent] = strconv.FormatBool(true)
 	}
+
 	return nil
 }
