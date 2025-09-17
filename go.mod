@@ -7,11 +7,10 @@ toolchain go1.24.5
 require (
 	github.com/ahmetb/gen-crd-api-reference-docs v0.3.0
 	github.com/avast/retry-go/v4 v4.6.1
-	github.com/gardener/gardener v1.118.0
+	github.com/gardener/gardener v1.117.1
 	github.com/go-logr/logr v1.4.3
 	github.com/go-openapi/strfmt v0.23.0
 	github.com/golang/mock v1.6.0
-	github.com/google/go-cmp v0.7.0
 	github.com/google/go-cmp v0.7.0
 	github.com/metal-stack/metal-lib v0.23.2
 	github.com/metal-stack/ontap-go v0.1.0

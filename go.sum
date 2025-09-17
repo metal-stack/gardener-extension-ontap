@@ -106,8 +106,8 @@ github.com/gardener/cert-management v0.17.6 h1:dSJEVbKC0EsfR+wNMemxfDPjIu0WlHHf0
 github.com/gardener/cert-management v0.17.6/go.mod h1:WdsNFeijUm8GI3icZxe3P2LnmGMlu6evmWi7PcdGH9o=
 github.com/gardener/etcd-druid/api v0.31.0 h1:iH800fQOTeTAwQzaUQ8jxKFlSI8shZtpNfCTpsm3EyA=
 github.com/gardener/etcd-druid/api v0.31.0/go.mod h1:usOvhSOpqlrlnr/DTugq8VDoZRCU2YmwyDfiy6hRVO8=
-github.com/gardener/gardener v1.118.0 h1:MOssGgVh3aobEFbuuC8s4+I9P2eW1W4QGWuZAe+uFH4=
-github.com/gardener/gardener v1.118.0/go.mod h1:Fdv9VldDlD+ozKKYvOH7Oz8kaJUWRMRgSF4FZPO4Vj0=
+github.com/gardener/gardener v1.117.1 h1:AMx283saik4tS6u/As76eSgK8M7VeJqSIETbv092bps=
+github.com/gardener/gardener v1.117.1/go.mod h1:xJZ5MXGoVsz8jsk0CxNVCe7qF0pfgqjqZ8dToIqq8bA=
 github.com/gardener/machine-controller-manager v0.59.2 h1:CSDKoNFzn8MdG+gJDp7ntsiuc7c57u82YYHLEbVdyOA=
 github.com/gardener/machine-controller-manager v0.59.2/go.mod h1:TCU/KoudCMt2eV0Jnrq2D1TwgsrBCuhIVgV3j1el6Og=
 github.com/ghodss/yaml v0.0.0-20150909031657-73d445a93680/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
@@ -329,8 +329,6 @@ github.com/prashantv/gostub v1.1.0 h1:BTyx3RfQjRHnUWaGF9oQos79AlQ5k8WNktv7VGvVH4
 github.com/prashantv/gostub v1.1.0/go.mod h1:A5zLQHz7ieHGG7is6LLXLz7I8+3LZzsrV0P1IAHhP5U=
 github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.82.2 h1:XXoaK87apyXqLm7xVEQ63pk8+GDupbVtHaBiW8IxPow=
 github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.82.2/go.mod h1:hY5yoQsoIalncoxYqXXCDL5y7f+GGYYlW9Bi2IdU5KY=
-github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.84.1 h1:NEQAo0Cl1gf9sJ3oI1QzczS3BF6ySvSSH36mwOZDuhI=
-github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.84.1/go.mod h1:MruMqbSS9aYrKhBImrO9X9g52hwz3I0B+tcoeAwkmuM=
 github.com/prometheus/client_golang v1.23.0 h1:ust4zpdl9r4trLY/gSjlm07PuiBq2ynaXXlptpfy8Uc=
 github.com/prometheus/client_golang v1.23.0/go.mod h1:i/o0R9ByOnHX0McrTMTyhYvKE4haaf2mW08I+jGAjEE=
 github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=
@@ -690,8 +688,6 @@ k8s.io/utils v0.0.0-20250820121507-0af2bda4dd1d/go.mod h1:OLgZIPagt7ERELqWJFomSt
 rsc.io/binaryregexp v0.2.0/go.mod h1:qTv7/COck+e2FymRvadv62gMdZztPaShugOCi3I+8D8=
 sigs.k8s.io/controller-runtime v0.20.4 h1:X3c+Odnxz+iPTRobG4tp092+CvBU9UK0t/bRf+n0DGU=
 sigs.k8s.io/controller-runtime v0.20.4/go.mod h1:xg2XB0K5ShQzAgsoujxuKN4LNXR2LfwwHsPj7Iaw+XY=
-sigs.k8s.io/controller-runtime v0.21.0 h1:CYfjpEuicjUecRk+KAeyYh+ouUBn4llGyDYytIGcJS8=
-sigs.k8s.io/controller-runtime v0.21.0/go.mod h1:OSg14+F65eWqIu4DceX7k/+QRAbTTvxeQSNSOQpukWM=
 sigs.k8s.io/controller-tools v0.18.0 h1:rGxGZCZTV2wJreeRgqVoWab/mfcumTMmSwKzoM9xrsE=
 sigs.k8s.io/controller-tools v0.18.0/go.mod h1:gLKoiGBriyNh+x1rWtUQnakUYEujErjXs9pf+x/8n1U=
 sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 h1:gBQPwqORJ8d8/YNZWEjoZs7npUVDpVXUUOFfW6CgAqE=
