@@ -31,6 +31,9 @@ func AddToManagerWithOptions(mgr manager.Manager, opts AddOptions) (*extensionsw
 			extensionswebhook.Type{
 				Obj: &appsv1.DaemonSet{},
 			},
+			extensionswebhook.Type{
+				Obj: &appsv1.Deployment{},
+			},
 		},
 		Mutator: NewMutator(mgr),
 	})
