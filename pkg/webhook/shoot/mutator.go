@@ -47,6 +47,7 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		"tridentactionsnapshotrestores.trident.netapp.io": true,
 		"tridentbackendconfigs.trident.netapp.io":         true,
 		"tridentbackends.trident.netapp.io":               true,
+		"tridentgroupsnapshots.trident.netapp.io":         true,
 		"tridentmirrorrelationships.trident.netapp.io":    true,
 		"tridentnodes.trident.netapp.io":                  true,
 		"tridentsnapshotinfos.trident.netapp.io":          true,
