@@ -172,6 +172,34 @@ rules:
       - update
       - patch
   - apiGroups:
+      - groupsnapshot.storage.k8s.io
+    resources:
+      - volumegroupsnapshots
+    verbs:
+      - list
+  - apiGroups:
+      - groupsnapshot.storage.k8s.io
+    resources:
+      - volumegroupsnapshotclasses
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - groupsnapshot.storage.k8s.io
+    resources:
+      - volumegroupsnapshotcontents
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+  - apiGroups:
+      - groupsnapshot.storage.k8s.io
+    resources:
+      - volumegroupsnapshotcontents/status
+    verbs:
+      - update
+  - apiGroups:
       - csi.storage.k8s.io
     resources:
       - csidrivers
@@ -229,6 +257,8 @@ rules:
       - tridentactionmirrorupdates/status
       - tridentsnapshotinfos
       - tridentsnapshotinfos/status
+      - tridentgroupsnapshots
+      - tridentgroupsnapshots/status
       - tridentactionsnapshotrestores
       - tridentactionsnapshotrestores/status
       - tridentprovisioners # Required for Tprov
@@ -434,6 +464,7 @@ kind: Deployment
 metadata:
   labels:
     app: operator.trident.netapp.io
+    shoot.gardener.cloud/no-cleanup: "true"
   name: trident-operator
   namespace: kube-system
 spec:
@@ -449,7 +480,13 @@ spec:
       labels:
         app: operator.trident.netapp.io
         name: trident-operator
+        networking.gardener.cloud/to-dns: allowed
+        networking.gardener.cloud/to-apiserver: allowed
+        networking.gardener.cloud/to-public-networks: allowed
     spec:
+    # locally the trident operator cant reacht he api-server for some reason, used to work before
+      # hostNetwork: true
+      # dnsPolicy: ClusterFirstWithHostNet
       containers:
         - command:
             - /trident-operator
@@ -491,36 +528,13 @@ spec:
                       - linux
       serviceAccountName: trident-operator
 ---
-apiVersion: trident.netapp.io/v1
-kind: TridentOrchestrator
-metadata:
-  name: trident
-spec:
-  namespace: kube-system
-  enableForceDetach: false
-  IPv6: false
-  k8sTimeout: 0
-  httpRequestTimeout: "90s"
-  silenceAutosupport: false
-  autosupportInsecure: false
-  logFormat: "text"
-  disableAuditLog: true
-  debug: false
-  imagePullSecrets: []
-  imagePullPolicy: IfNotPresent
-  windows: false
-  enableACP: false
-  enableAutoBackendConfig: true
-  iscsiSelfHealingInterval: "5m0s"
-  iscsiSelfHealingWaitTime: "7m0s"
----
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: ontap-csi-node
   namespace: kube-system
-labels:
-  node.gardener.cloud/critical-component: "true"
+  labels:
+    node.gardener.cloud/critical-component: "true"
 spec:
   selector:
     matchLabels:
@@ -572,3 +586,28 @@ spec:
           operator: Exists
         - key: CriticalAddonsOnly
           operator: Exists
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentOrchestrator
+metadata:
+  name: trident
+  labels:
+    shoot.gardener.cloud/no-cleanup: "true"
+spec:
+  namespace: kube-system
+  enableForceDetach: false
+  IPv6: false
+  k8sTimeout: 0
+  httpRequestTimeout: "90s"
+  silenceAutosupport: false
+  autosupportInsecure: false
+  logFormat: "text"
+  disableAuditLog: true
+  debug: false
+  imagePullSecrets: []
+  imagePullPolicy: IfNotPresent
+  windows: false
+  enableACP: false
+  enableAutoBackendConfig: true
+  iscsiSelfHealingInterval: "5m0s"
+  iscsiSelfHealingWaitTime: "7m0s"

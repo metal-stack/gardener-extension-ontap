@@ -6,7 +6,6 @@ metadata:
   labels:
 {{ include "labels" . | indent 4 }}
 rules:
-rules:
 - apiGroups:
   - extensions.gardener.cloud
   resources:
@@ -56,12 +55,22 @@ rules:
   - watch
   - create
   - delete
+  - patch
+  - update
 - apiGroups:
   - "storage.k8s.io"
   resources:
   - storageclasses
   verbs:
   - get
+  - list
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
   - list
   - watch
 - apiGroups:
@@ -74,6 +83,9 @@ rules:
   - patch
 - apiGroups:
   - coordination.k8s.io
+  resourceNames:
+  - extension-ontap-leader-election
+  - gardener-extension-heartbeat
   resources:
   - leases
   verbs:
@@ -81,15 +93,32 @@ rules:
   - update
   - list
   - watch
-- apiGroups:
-  - coordination.k8s.io
-  resources:
-  - leases
-  resourceNames:
-  - extension-ontap-leader-election
-  verbs:
-  - update
+  - patch
   - get
+- apiGroups:
+  - ""
+  resources:
+  - services
+  - endpoints
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations
+  - validatingwebhookconfigurations
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
 # dns records seem to be a regression?
 - apiGroups:
   - extensions.gardener.cloud

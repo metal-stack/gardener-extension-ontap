@@ -3,6 +3,8 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: ontap-gold
+  labels:
+    shoot.gardener.cloud/no-cleanup: "true"
 provisioner: csi.trident.netapp.io
 parameters:
   backendType: "ontap-san"
