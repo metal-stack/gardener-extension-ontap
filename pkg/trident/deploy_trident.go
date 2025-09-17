@@ -48,11 +48,11 @@ var (
 	cwnpPath        = filepath.Join(resourcesPath, "cwnps")
 
 	tridentResources = []tridentResource{
-		{name: tridentInitMR, path: tridentInitPath, waitForHealthy: false, keepObjects: false},
 		{name: tridentCRDsName, path: crdPath, waitForHealthy: true, keepObjects: true},
 		{name: tridentBackendsMR, path: backendPath, waitForHealthy: false, keepObjects: false},
 		{name: tridentSvmSecret, path: svmSecretsPath, waitForHealthy: false, keepObjects: false},
 		{name: tridentCwnp, path: cwnpPath, waitForHealthy: false, keepObjects: false},
+		{name: tridentInitMR, path: tridentInitPath, waitForHealthy: false, keepObjects: true},
 	}
 )
 
