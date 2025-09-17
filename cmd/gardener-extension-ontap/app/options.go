@@ -154,7 +154,7 @@ func (options *Options) run(ctx context.Context) error {
 	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation, pointer.Pointer(extensionsv1alpha1.ExtensionClassShoot))
 	options.heartbeatOptions.Completed().Apply(&heartbeatcontroller.DefaultAddOptions)
 
-	atomicShootWebhookConfig, err := options.webhookOptions.Completed().AddToManager(ctx, mgr, nil, false)
+	atomicShootWebhookConfig, err := options.webhookOptions.Completed().AddToManager(ctx, mgr, nil)
 	if err != nil {
 		return fmt.Errorf("could not add webhooks to manager: %w", err)
 	}
