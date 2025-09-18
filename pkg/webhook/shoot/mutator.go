@@ -27,7 +27,8 @@ type mutator struct {
 }
 
 const (
-	mutatedByOntap = "ontap.extensions.gardener.cloud/mutated-by-webhook"
+	mutatedByOntap     = "ontap.extensions.gardener.cloud/mutated-by-webhook"
+	ontapCsiDriverName = "csi.trident.netapp.io"
 )
 
 var gardenerToleration = v1.Toleration{
@@ -86,34 +87,33 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, x.Spec.Template.Annotations, x.Spec.Template.Spec.Tolerations, true)
+		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, x.Spec.Template.Annotations, &x.Spec.Template.Spec.Tolerations, true)
 	case *appsv1.Deployment:
 		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, x.Spec.Template.Annotations, x.Spec.Template.Spec.Tolerations, true)
+		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, x.Spec.Template.Annotations, &x.Spec.Template.Spec.Tolerations, true)
 	}
 
 	return nil
 }
 
-// mutateObjectLabels adds labels to the given object
-func (m *mutator) mutateObjectLabels(_ context.Context, labels, annotations map[string]string, toleration []v1.Toleration, criticalLabel bool) error {
+func (m *mutator) mutateObjectLabels(_ context.Context, labels, annotations map[string]string, tolerations *[]v1.Toleration, criticalLabel bool) error {
 	if labels == nil {
 		labels = make(map[string]string)
 	}
 
-	if toleration == nil {
-		toleration = make([]v1.Toleration, 0)
+	if *tolerations == nil {
+		*tolerations = make([]v1.Toleration, 0)
 	}
 
 	labels[v1beta1constants.ShootNoCleanup] = strconv.FormatBool(true)
 	labels[mutatedByOntap] = strconv.FormatBool(true)
 	if criticalLabel {
 		labels[v1beta1constants.LabelNodeCriticalComponent] = strconv.FormatBool(true)
-		annotations[v1beta1constants.AnnotationPrefixWaitForCSINode] = "csi.trident.netapp.io"
-		toleration = append(toleration, gardenerToleration)
+		annotations[v1beta1constants.AnnotationPrefixWaitForCSINode] = ontapCsiDriverName
+		*tolerations = append(*tolerations, gardenerToleration)
 	}
 
 	return nil
