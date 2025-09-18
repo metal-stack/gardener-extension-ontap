@@ -4,8 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
+	extensionscontroller "github.com/gardener/gardener/extensions/pkg/controller"
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
+	"github.com/gardener/gardener/extensions/pkg/webhook"
+
+	"github.com/gardener/gardener/extensions/pkg/webhook/shoot"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -31,25 +36,29 @@ import (
 // FIXME here the logic to deploy the trident operator
 
 type actuator struct {
-	ontap          *ontapv1.Ontap
-	client         client.Client
-	shootNamespace string
-	decoder        runtime.Decoder
-	config         config.ControllerConfiguration
+	ontap              *ontapv1.Ontap
+	client             client.Client
+	shootNamespace     string
+	decoder            runtime.Decoder
+	config             config.ControllerConfiguration
+	shootWebhookConfig *atomic.Value
 }
 
+const ShootWebhooksResourceName = "extension-ontap-shoot"
+
 // NewActuator returns an actuator responsible for Extension resources.
-func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration) (extension.Actuator, error) {
+func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration, shootWebhookConfig *atomic.Value) (extension.Actuator, error) {
 	ontapClient, err := createAdminClient(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	return &actuator{
-		ontap:   ontapClient,
-		client:  mgr.GetClient(),
-		decoder: serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-		config:  config,
+		ontap:              ontapClient,
+		client:             mgr.GetClient(),
+		decoder:            serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
+		config:             config,
+		shootWebhookConfig: shootWebhookConfig,
 	}, nil
 }
 
@@ -186,38 +195,27 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		Username:       string(username),
 		Password:       string(password),
 	}
-	err := trident.DeployTrident(ctx, log, a.client, tridentValues)
+	if err := trident.DeployTrident(ctx, log, a.client, tridentValues); err != nil {
+		return err
+	}
+
+	clusterd, err := extensionscontroller.GetCluster(ctx, a.client, ex.Namespace)
+	if client.IgnoreNotFound(err) != nil {
+		return err
+	}
+
+	err = a.reconcileShootWebhookConfig(ctx, clusterd)
 	if err != nil {
 		return err
 	}
 
 	log.Info("ONTAP extension reconciliation completed successfully")
-
 	return nil
 }
 
 // Delete the Extension resource.
 func (a *actuator) Delete(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentBackendsMR, false); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentBackendsMR); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentInitMR, false); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentInitMR); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.Delete(ctx, a.client, ex.Namespace, tridentCRDsName, false); err != nil {
-	// 	return err
-	// }
-	// if err := managedresources.WaitUntilDeleted(ctx, a.client, ex.Namespace, tridentCRDsName); err != nil {
-	// 	return err
-	// }
-	// log.Info("ManagedResource for Trident operator successfully deleted.")
-	return nil
+	return trident.DeleteManagedResources(ctx, log, a.client, ex)
 }
 
 // ForceDelete the Extension resource
@@ -250,5 +248,19 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, Svm
 	}
 
 	log.Info("SVM state ensured successfully", "projectId", projectId)
+	return nil
+}
+
+func (a *actuator) reconcileShootWebhookConfig(ctx context.Context, cluster *extensionscontroller.Cluster) error {
+	value := a.shootWebhookConfig.Load()
+	webhookConfig, ok := value.(*webhook.Configs)
+	if !ok {
+		return fmt.Errorf("expected *webhook.Configs, got %T", value)
+	}
+
+	if err := shoot.ReconcileWebhookConfig(ctx, a.client, cluster.ObjectMeta.Name, ShootWebhooksResourceName, *webhookConfig, cluster, true); err != nil {
+		return fmt.Errorf("could not reconcile shoot webhooks: %w", err)
+	}
+
 	return nil
 }
