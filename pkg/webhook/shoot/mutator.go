@@ -10,6 +10,7 @@ import (
 	v1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
+	v1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -25,7 +26,16 @@ type mutator struct {
 	logger  logr.Logger
 }
 
-const mutatedByOntap = "ontap.extensions.gardener.cloud/mutated-by-webhook"
+const (
+	mutatedByOntap = "ontap.extensions.gardener.cloud/mutated-by-webhook"
+)
+
+var gardenerToleration = v1.Toleration{
+	Key:      "node.gardener.cloud",
+	Operator: v1.TolerationOpEqual,
+	Value:    "critical-components-not-ready",
+	Effect:   v1.TaintEffectNoSchedule,
+}
 
 // NewMutator creates a new Mutator that mutates resources in the shoot cluster.
 func NewMutator(mgr manager.Manager) extensionswebhook.Mutator {
@@ -69,35 +79,41 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 	case *apiextensionsv1.CustomResourceDefinition:
 		if tridentCRDs[x.Name] {
 			extensionswebhook.LogMutation(m.logger, x.Kind, x.Namespace, x.Name)
-			return m.mutateObjectLabels(ctx, x.Labels, false)
+			return m.mutateObjectLabels(ctx, x.Labels, x.Annotations, nil, false)
 		}
 	case *appsv1.DaemonSet:
 		if x.Name != "trident-node-linux" || x.Namespace != "kube-system" {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
+		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, x.Spec.Template.Annotations, x.Spec.Template.Spec.Tolerations, true)
 	case *appsv1.Deployment:
 		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
+		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, x.Spec.Template.Annotations, x.Spec.Template.Spec.Tolerations, true)
 	}
 
 	return nil
 }
 
 // mutateObjectLabels adds labels to the given object
-func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string, criticalLabel bool) error {
+func (m *mutator) mutateObjectLabels(_ context.Context, labels, annotations map[string]string, toleration []v1.Toleration, criticalLabel bool) error {
 	if labels == nil {
 		labels = make(map[string]string)
+	}
+
+	if toleration == nil {
+		toleration = make([]v1.Toleration, 0)
 	}
 
 	labels[v1beta1constants.ShootNoCleanup] = strconv.FormatBool(true)
 	labels[mutatedByOntap] = strconv.FormatBool(true)
 	if criticalLabel {
 		labels[v1beta1constants.LabelNodeCriticalComponent] = strconv.FormatBool(true)
+		annotations[v1beta1constants.AnnotationPrefixWaitForCSINode] = "csi.trident.netapp.io"
+		toleration = append(toleration, gardenerToleration)
 	}
 
 	return nil
