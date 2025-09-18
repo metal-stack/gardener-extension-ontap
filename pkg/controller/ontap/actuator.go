@@ -2,7 +2,6 @@ package ontap
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -234,34 +233,21 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 	return nil
 }
 
-// ensureSvmForProject checks if an SVM for the given project ID exists, creates it if not.
+// ensureSvmForProject ensures a complete SVM exists with all required components
 func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
 	svnManager := trident.NewSvmManager(log, a.ontap, a.client)
 
-	_, err := svnManager.GetSVMByName(ctx, projectId)
-	if err != nil {
-		if errors.Is(err, trident.ErrSvmNotFound) {
-			log.Info("SVM not found, proceeding with creation", "projectId", projectId)
-
-			svmOpts := trident.CreateSVMOptions{
-				ProjectID:              projectId,
-				SvmIpaddresses:         SvmIpaddresses,
-				SvmSeedSecretNamespace: svmSeedSecretNamespace,
-			}
-
-			if err := svnManager.CreateSVM(ctx, svmOpts); err != nil {
-				return fmt.Errorf("failed to ensure SVM for project %s: %w", projectId, err)
-			}
-			log.Info("Successfully created SVM", "projectId", projectId)
-			return nil
-		}
-
-		// Handle other errors from GetSVMByName
-		return fmt.Errorf("failed to check for existing SVM %s: %w", projectId, err)
+	svmOpts := trident.CreateSVMOptions{
+		ProjectID:              projectId,
+		SvmIpaddresses:         SvmIpaddresses,
+		SvmSeedSecretNamespace: svmSeedSecretNamespace,
 	}
 
-	log.Info("SVM already exists, skipping creation", "projectId", projectId)
+	if err := svnManager.EnsureCompleteSVM(ctx, svmOpts); err != nil {
+		return fmt.Errorf("failed to ensure complete SVM for project %s: %w", projectId, err)
+	}
 
+	log.Info("SVM state ensured successfully", "projectId", projectId)
 	return nil
 }
 

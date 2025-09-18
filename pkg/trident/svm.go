@@ -15,9 +15,6 @@ import (
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	"github.com/metal-stack/ontap-go/api/client/storage"
 	"github.com/metal-stack/ontap-go/api/models"
-	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
@@ -280,6 +277,185 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 	return nil
 }
 
+// validateAndEnsureCompleteSVMState validates all components of an SVM and creates missing parts
+func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, svmUUID, svmName string, opts CreateSVMOptions) error {
+	m.log.Info("Validating complete SVM state", "svmName", svmName, "uuid", svmUUID)
+
+	// 1. Validate SVM is running and NVMe enabled
+	if err := m.validateSVMRunningState(ctx, svmUUID, svmName); err != nil {
+		return err
+	}
+
+	// 2. Get cluster nodes for LIF creation (if needed)
+	nodesUUIDs, err := m.getAllNodesInCluster(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get cluster nodes for SVM validation: %w", err)
+	}
+
+	// 3. Validate and ensure data LIFs exist
+	if err := m.validateAndEnsureDataLIFs(ctx, svmUUID, svmName, opts.SvmIpaddresses.DataLifs, nodesUUIDs); err != nil {
+		return err
+	}
+
+	// 4. Validate and ensure management LIF exists
+	if err := m.validateAndEnsureManagementLIF(ctx, svmUUID, svmName, opts.SvmIpaddresses.ManagementLif, nodesUUIDs[0]); err != nil {
+		return err
+	}
+
+	// 5. Validate and ensure user and secret exist
+	userOpts := userAndSecretOptions{
+		projectID:              svmName,
+		svmSeedSecretNamespace: opts.SvmSeedSecretNamespace,
+		seedClient:             m.seedClient,
+		svmUUID:                svmUUID,
+	}
+	if err := m.CreateUserAndSecret(ctx, userOpts); err != nil {
+		return fmt.Errorf("failed to ensure user and secret for SVM %s: %w", svmName, err)
+	}
+
+	m.log.Info("SVM state validation and completion successful", "svmName", svmName)
+	return nil
+}
+
+// validateSVMRunningState checks if SVM is in running state with NVMe enabled
+func (m *SvmManager) validateSVMRunningState(ctx context.Context, svmUUID, svmName string) error {
+	getParams := s_vm.NewSvmGetParamsWithContext(ctx)
+	getParams.SetUUID(svmUUID)
+
+	svmInfo, err := m.ontapClient.SVM.SvmGet(getParams, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get SVM details for validation: %w", err)
+	}
+	if svmInfo.Payload == nil || svmInfo.Payload.State == nil {
+		return fmt.Errorf("SVM state information is missing")
+	}
+	if *svmInfo.Payload.State != "running" {
+		return fmt.Errorf("SVM is not in running state: %s", *svmInfo.Payload.State)
+	}
+	if svmInfo.Payload.Nvme == nil || svmInfo.Payload.Nvme.Enabled == nil || !*svmInfo.Payload.Nvme.Enabled {
+		return fmt.Errorf("SVM NVMe is not enabled")
+	}
+
+	return nil
+}
+
+// getExistingNetworkInterfaces gets all network interfaces for an SVM
+func (m *SvmManager) getExistingNetworkInterfaces(ctx context.Context, svmUUID string) (map[string]string, error) {
+	params := networking.NewNetworkIPInterfacesGetParamsWithContext(ctx)
+	params.SetSvmUUID(&svmUUID)
+	fields := []string{"name", "ip.address"}
+	params.SetFields(fields)
+
+	result, err := m.ontapClient.Networking.NetworkIPInterfacesGet(params, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get network interfaces: %w", err)
+	}
+
+	interfaces := make(map[string]string)
+	if result.Payload != nil && result.Payload.IPInterfaceResponseInlineRecords != nil {
+		for _, intf := range result.Payload.IPInterfaceResponseInlineRecords {
+			if intf.Name != nil && intf.IP != nil && intf.IP.Address != nil {
+				interfaces[*intf.Name] = string(*intf.IP.Address)
+			}
+		}
+	}
+
+	return interfaces, nil
+}
+
+// validateAndEnsureDataLIFs validates all expected data LIFs exist and creates missing ones
+func (m *SvmManager) validateAndEnsureDataLIFs(ctx context.Context, svmUUID, svmName string, expectedDataLifs []string, nodesUUIDs []string) error {
+	existingInterfaces, err := m.getExistingNetworkInterfaces(ctx, svmUUID)
+	if err != nil {
+		return err
+	}
+
+	for i, datalifIp := range expectedDataLifs {
+		expectedLifName := fmt.Sprintf("%s+%d", dataLifTag, i)
+
+		if existingIP, exists := existingInterfaces[expectedLifName]; exists {
+			if existingIP == datalifIp {
+				m.log.Info("Data LIF already exists with correct IP", "lifName", expectedLifName, "ip", datalifIp)
+				continue
+			} else {
+				m.log.Error(fmt.Errorf("data LIF exists but with different IP"), "skipping", "lifName", expectedLifName, "existing", existingIP, "expected", datalifIp)
+				continue // Don't try to fix IP mismatches for now
+			}
+		}
+
+		// Create missing data LIF
+		m.log.Info("Creating missing data LIF", "lifName", expectedLifName, "ip", datalifIp)
+		selectedNodeUUID := nodesUUIDs[i%len(nodesUUIDs)]
+		dataLifOpts := networkInterfaceOptions{
+			svmUUID:   svmUUID,
+			svmName:   svmName,
+			ipAddress: datalifIp,
+			lifName:   expectedLifName,
+			nodeUUID:  selectedNodeUUID,
+			isDataLif: true,
+		}
+		if err := m.createNetworkInterfaceForSvm(ctx, dataLifOpts); err != nil {
+			return fmt.Errorf("failed to create missing data LIF %s: %w", expectedLifName, err)
+		}
+	}
+
+	return nil
+}
+
+// validateAndEnsureManagementLIF validates management LIF exists and creates if missing
+func (m *SvmManager) validateAndEnsureManagementLIF(ctx context.Context, svmUUID, svmName, managementIP, nodeUUID string) error {
+	existingInterfaces, err := m.getExistingNetworkInterfaces(ctx, svmUUID)
+	if err != nil {
+		return err
+	}
+
+	if existingIP, exists := existingInterfaces[managementLifTag]; exists {
+		if existingIP == managementIP {
+			m.log.Info("Management LIF already exists with correct IP", "ip", managementIP)
+			return nil
+		} else {
+			m.log.Error(fmt.Errorf("management LIF exists but with different IP"), "skipping", "existing", existingIP, "expected", managementIP)
+			return nil // Don't try to fix IP mismatches for now
+		}
+	}
+
+	// Create missing management LIF
+	m.log.Info("Creating missing management LIF", "ip", managementIP)
+	mgmtLifOpts := networkInterfaceOptions{
+		svmUUID:   svmUUID,
+		svmName:   svmName,
+		ipAddress: managementIP,
+		lifName:   managementLifTag,
+		nodeUUID:  nodeUUID,
+		isDataLif: false,
+	}
+	if err := m.createNetworkInterfaceForSvm(ctx, mgmtLifOpts); err != nil {
+		return fmt.Errorf("failed to create missing management LIF: %w", err)
+	}
+
+	return nil
+}
+
+// EnsureCompleteSVM ensures a complete SVM exists with all required components, creating missing parts
+func (m *SvmManager) EnsureCompleteSVM(ctx context.Context, opts CreateSVMOptions) error {
+	m.log.Info("Ensuring complete SVM state", "projectId", opts.ProjectID)
+
+	// First check if SVM exists
+	existingUUID, err := m.GetSVMByName(ctx, opts.ProjectID)
+	if err != nil {
+		if errors.Is(err, ErrSvmNotFound) {
+			// SVM doesn't exist, create it completely
+			m.log.Info("SVM not found, creating complete SVM", "projectId", opts.ProjectID)
+			return m.CreateSVM(ctx, opts)
+		}
+		return fmt.Errorf("failed to check existing SVM: %w", err)
+	}
+
+	// SVM exists, validate and ensure all components are complete
+	m.log.Info("SVM exists, validating completeness", "projectId", opts.ProjectID, "uuid", *existingUUID)
+	return m.validateAndEnsureCompleteSVMState(ctx, *existingUUID, opts.ProjectID, opts)
+}
+
 // Returns a svm by inputting the svmName, i.e. projectId
 func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string, error) {
 	if m.ontapClient == nil || m.ontapClient.SVM == nil {
@@ -302,29 +478,6 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 		if svm.Name != nil && *svm.Name == svmName {
 			if svm.UUID != nil {
 				m.log.Info("Found SVM", "name", svmName, "uuid", *svm.UUID)
-
-				// Check for the seed secret, if it's not there create it here, because the svm already exists but seed secret is missing
-				// This can only happen on the first shoot of the project
-				// If this happens on the second shoot or n shoot, something is really broken
-				secretName := fmt.Sprintf("ontap-svm-%s-credentials", svmName)
-				err = m.seedClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Secret{ObjectMeta: v1.ObjectMeta{Name: secretName, Namespace: "kube-system"}}), &corev1.Secret{})
-				if err != nil {
-					if k8serrors.IsNotFound(err) {
-						m.log.Info("seed secret does not exist even tho svm exists, creating user and secret", "secret", secretName)
-						userOpts := userAndSecretOptions{
-							projectID:              svmName,
-							svmSeedSecretNamespace: "kube-system",
-							seedClient:             m.seedClient,
-							svmUUID:                *svm.UUID,
-						}
-						err = m.CreateUserAndSecret(ctx, userOpts)
-						if err != nil {
-							return nil, err
-						}
-					} else {
-						return nil, err
-					}
-				}
 
 				// Return the UUID when SVM is found and seed secret exists
 				return svm.UUID, nil
