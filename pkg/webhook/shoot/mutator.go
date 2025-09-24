@@ -84,6 +84,7 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
 		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
 	}
+	m.logger.Info("not mutating ressource at all", "rsrc", new)
 
 	return nil
 }
