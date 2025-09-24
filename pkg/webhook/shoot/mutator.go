@@ -69,28 +69,30 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 	case *apiextensionsv1.CustomResourceDefinition:
 		if tridentCRDs[x.Name] {
 			extensionswebhook.LogMutation(m.logger, x.Kind, x.Namespace, x.Name)
-			return m.mutateObjectLabels(ctx, x.Labels, false)
+			return m.mutateObjectLabels(ctx, x, x.Labels, false)
 		}
+		return nil
 	case *appsv1.DaemonSet:
 		if x.Name != "trident-node-linux" || x.Namespace != "kube-system" {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
+		return m.mutateObjectLabels(ctx, x, x.Spec.Template.Labels, true)
 	case *appsv1.Deployment:
 		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
+		return m.mutateObjectLabels(ctx, x, x.Spec.Template.Labels, true)
 	}
-	m.logger.Info("not mutating ressource at all", "rsrc", new)
+
+	m.logger.Info("not mutating resource", "rsrc", new)
 
 	return nil
 }
 
 // mutateObjectLabels adds labels to the given object
-func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string, criticalLabel bool) error {
+func (m *mutator) mutateObjectLabels(_ context.Context, o client.Object, labels map[string]string, criticalLabel bool) error {
 	if labels == nil {
 		labels = make(map[string]string)
 	}
@@ -100,6 +102,8 @@ func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string
 	if criticalLabel {
 		labels[v1beta1constants.LabelNodeCriticalComponent] = strconv.FormatBool(true)
 	}
+
+	o.SetLabels(labels)
 
 	return nil
 }
