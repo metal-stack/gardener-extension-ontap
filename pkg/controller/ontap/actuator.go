@@ -38,7 +38,6 @@ import (
 type actuator struct {
 	ontap              *ontapv1.Ontap
 	client             client.Client
-	shootNamespace     string
 	decoder            runtime.Decoder
 	config             config.ControllerConfiguration
 	shootWebhookConfig *atomic.Value
@@ -114,7 +113,7 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 
 // Reconcile handles extension creation and updates.
 func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
-	a.shootNamespace = ex.Namespace
+	shootNamespace := ex.Namespace
 
 	if ex.Spec.ProviderConfig == nil {
 		return fmt.Errorf("provider config is nil")
@@ -188,7 +187,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	}
 
 	tridentValues := trident.DeployTridentValues{
-		Namespace:      a.shootNamespace,
+		Namespace:      shootNamespace,
 		ProjectId:      projectId,
 		SeedsecretName: &seedsecretName,
 		SvmIpAddresses: svmIpAddresses,
