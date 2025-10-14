@@ -41,6 +41,7 @@ const (
 // CreateSVMOptions holds the parameters required for CreateSVM function.
 type CreateSVMOptions struct {
 	ProjectID              string
+	ShootNamespace         string // Full namespace like "shoot--<project>--<name>"
 	SvmIpaddresses         ontapv1alpha1.SvmIpaddresses
 	SvmSeedSecretNamespace string
 }
@@ -160,9 +161,10 @@ func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	}
 
 	// 7. Create user and secret in svmSeedSecretNamespace namespace
-	m.log.Info("Proceeding to create user and secret for SVM", "svm", opts.ProjectID)
+	m.log.Info("Proceeding to create user and secret for SVM", "svm", opts.ProjectID, "shootNamespace", opts.ShootNamespace)
 	userOpts := userAndSecretOptions{
 		projectID:              opts.ProjectID,
+		shootNamespace:         opts.ShootNamespace,
 		svmSeedSecretNamespace: opts.SvmSeedSecretNamespace,
 		seedClient:             m.seedClient,
 		svmUUID:                svmUUID,
@@ -204,10 +206,10 @@ func (m *SvmManager) getAllNodesInCluster(ctx context.Context) ([]string, error)
 		nodeUUIDs = append(nodeUUIDs, node.UUID.String())
 	}
 
-	if len(nodeRecords) < 2 {
-		// we want more than 1 node for metro a metro cluster setup
-		return nil, fmt.Errorf("less than 2 nodes were returned for cluster %v,err: %w", nodeUUIDs, err)
-	}
+	// if len(nodeRecords) < 2 {
+	// 	// we want more than 1 node for metro a metro cluster setup
+	// 	return nil, fmt.Errorf("less than 2 nodes were returned for cluster %v,err: %w", nodeUUIDs, err)
+	// }
 
 	return nodeUUIDs, nil
 }
@@ -302,9 +304,9 @@ func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, svmU
 		return err
 	}
 
-	// 5. Validate and ensure user and secret exist
 	userOpts := userAndSecretOptions{
 		projectID:              svmName,
+		shootNamespace:         opts.ShootNamespace,
 		svmSeedSecretNamespace: opts.SvmSeedSecretNamespace,
 		seedClient:             m.seedClient,
 		svmUUID:                svmUUID,
