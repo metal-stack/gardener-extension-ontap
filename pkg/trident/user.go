@@ -21,8 +21,7 @@ import (
 
 const (
 	defaultSVMUsername      = "svmAdmin"
-	SecretNameFormat        = "ontap-svm-%s-credentials" ////nolint:all
-	ClusterSecretNameFormat = "%s-%s-credentials"        ////nolint:all
+	ClusterSecretNameFormat = "%s-%s-credentials" ////nolint:all
 )
 
 // DeployTridentSecretsOptions holds parameters for DeployTridentSecretsInShootAsMR
