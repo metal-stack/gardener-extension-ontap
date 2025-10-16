@@ -12,7 +12,7 @@ spec:
   sanType: nvme
   managementLIF: ${MANAGEMENT_LIF_IP}
   credentials:
-    name: ontap-svm-${PROJECT_ID}-credentials
+    name: ${SECRET_NAME}
   storage:
   - labels:
       luks: "true"
