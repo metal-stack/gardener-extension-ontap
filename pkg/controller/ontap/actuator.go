@@ -150,7 +150,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return fmt.Errorf("no project ID found in shoot annotations")
 	}
 
-	log.Info("Found project ID in shoot annotations", "projectId", projectId)
+	log.Info("Found project ID and shoot namespace", "projectId", projectId, "shootNamespace", shootNamespace)
 	// Project id "-" to be replaced, ontap doesn't like "-"
 	projectId = strings.ReplaceAll(projectId, "-", "")
 	// ontap wants a letter or _ as prefix
@@ -158,12 +158,14 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 
 	svmSeedSecretNamespace := "kube-system"
 
-	log.Info("Using project ID for SVM creation", "projectId", projectId, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
-	if err := a.ensureSvmForProject(ctx, log, ontapConfig.SvmIpaddresses, projectId, svmSeedSecretNamespace); err != nil {
+	log.Info("Using project ID for SVM creation", "projectId", projectId, "shootNamespace", shootNamespace, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
+	if err := a.ensureSvmForProject(ctx, log, ontapConfig.SvmIpaddresses, projectId, shootNamespace, svmSeedSecretNamespace); err != nil {
 		return err
 	}
 
-	seedsecretName := fmt.Sprintf(trident.SecretNameFormat, projectId)
+	// Use cluster-specific secret name (remove shoot-- prefix for cleaner names)
+	shootNamespaceForSecret := strings.TrimPrefix(shootNamespace, "shoot--")
+	seedsecretName := fmt.Sprintf(trident.ClusterSecretNameFormat, projectId, shootNamespaceForSecret)
 	log.Info("Using credentials from secret in shoot cluster", "secretName", seedsecretName, "namespace", "kube-system")
 
 	// get existing secret for svm in kube-system namespace
@@ -233,20 +235,21 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 // ensureSvmForProject ensures a complete SVM exists with all required components
-func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, svmSeedSecretNamespace string) error {
+func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, shootNamespace string, svmSeedSecretNamespace string) error {
 	svnManager := trident.NewSvmManager(log, a.ontap, a.client)
 
 	svmOpts := trident.CreateSVMOptions{
 		ProjectID:              projectId,
+		ShootNamespace:         shootNamespace,
 		SvmIpaddresses:         SvmIpaddresses,
 		SvmSeedSecretNamespace: svmSeedSecretNamespace,
 	}
 
 	if err := svnManager.EnsureCompleteSVM(ctx, svmOpts); err != nil {
-		return fmt.Errorf("failed to ensure complete SVM for project %s: %w", projectId, err)
+		return fmt.Errorf("failed to ensure complete SVM for project %s shoot namespace %s: %w", projectId, shootNamespace, err)
 	}
 
-	log.Info("SVM state ensured successfully", "projectId", projectId)
+	log.Info("SVM state ensured successfully", "projectId", projectId, "shootNamespace", shootNamespace)
 	return nil
 }
 
