@@ -96,6 +96,10 @@ EOF
 kubectl -n garden-<project-name> annotate shoot <shoot-name> gardener.cloud/operation=reconcile
 ```
 
+
+kubectl patch torc trident -n <namespace> --type=merge -p '{"spec":{"debug":true}}'
+
+
 ## Test Environment Setup
 
 To properly set up the test environment, we need to configure network translation between the external IPs (10.x) and internal KVM network (192.168.x).
@@ -299,3 +303,5 @@ spec:
 
 - ✅ = Resource exists and is correct
 - ❌ = Resource missing or not functional
+
+

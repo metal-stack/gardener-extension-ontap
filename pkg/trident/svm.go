@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/avast/retry-go/v4"
@@ -470,24 +471,34 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 		return nil, fmt.Errorf("failed to fetch SVMs: %w", err)
 	}
 
-	m.log.Info("Checking for SVM with name", "name", svmName)
 	if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
 		m.log.Info("No SVMs found in the response")
 		return nil, ErrSvmNotFound
 	}
 
-	for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
-		if svm.Name != nil && *svm.Name == svmName {
-			if svm.UUID != nil {
-				m.log.Info("Found SVM", "name", svmName, "uuid", *svm.UUID)
+	namesToCheck := []string{svmName}
+	if !strings.HasSuffix(svmName, "-mc") {
+		namesToCheck = append(namesToCheck, fmt.Sprintf("%s-mc", svmName))
+	}
 
-				// Return the UUID when SVM is found and seed secret exists
-				return svm.UUID, nil
+	for idx, nameToFind := range namesToCheck {
+		if idx == 0 {
+			m.log.Info("Checking for SVM with name", "name", nameToFind)
+		} else {
+			m.log.Info("Primary SVM name not found, trying fallback", "fallbackName", nameToFind)
+		}
+
+		for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
+			if svm.Name != nil && *svm.Name == nameToFind {
+				if svm.UUID != nil {
+					m.log.Info("Found SVM", "name", nameToFind, "uuid", *svm.UUID)
+					return svm.UUID, nil
+				}
 			}
 		}
 	}
 
-	m.log.Info("SVM not found", "name", svmName)
+	m.log.Info("SVM not found after trying all known names", "requestedName", svmName, "attemptedNames", namesToCheck)
 	return nil, ErrSvmNotFound
 }
 
