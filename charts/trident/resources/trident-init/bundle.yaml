@@ -595,7 +595,7 @@ metadata:
     shoot.gardener.cloud/no-cleanup: "true"
 spec:
   namespace: kube-system
-  enableForceDetach: false
+  enableForceDetach: true
   IPv6: false
   k8sTimeout: 0
   httpRequestTimeout: "90s"
@@ -603,7 +603,7 @@ spec:
   autosupportInsecure: false
   logFormat: "text"
   disableAuditLog: true
-  debug: false
+  debug: true
   imagePullSecrets: []
   imagePullPolicy: IfNotPresent
   windows: false
