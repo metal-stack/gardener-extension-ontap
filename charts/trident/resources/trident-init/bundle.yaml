@@ -484,9 +484,6 @@ spec:
         networking.gardener.cloud/to-apiserver: allowed
         networking.gardener.cloud/to-public-networks: allowed
     spec:
-    # locally the trident operator cant reacht he api-server for some reason, used to work before
-      # hostNetwork: true
-      # dnsPolicy: ClusterFirstWithHostNet
       containers:
         - command:
             - /trident-operator
@@ -498,7 +495,7 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: trident-operator
-          image: netapp/trident-operator:25.06.1
+          image: docker.io/netapp/trident-operator:25.06.3
           imagePullPolicy: IfNotPresent
           name: trident-operator
           resources:
