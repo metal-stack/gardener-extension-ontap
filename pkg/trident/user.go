@@ -260,23 +260,8 @@ func (m *SvmManager) createCompleteUserAndSecret(ctx context.Context, username s
 // validatePasswordConsistency ensures ONTAP and K8s passwords match
 func (m *SvmManager) validatePasswordConsistency(ctx context.Context, username string, secretName string, opts userAndSecretOptions, secretPassword string) error {
 	m.log.Info("Both ONTAP user and K8s secret exist, validating consistency", "svm", opts.projectID, "user", username)
-
-	// Since we can't directly validate ONTAP password, we'll try to update it
-	// If the update succeeds, we know the user is functional
-	_, err := m.updateExistingUserPassword(ctx, username, opts.projectID, secretPassword)
-	if err != nil {
-		// If password update fails, try to fix by generating new password
-		m.log.Info("Password consistency validation failed, resetting password", "svm", opts.projectID, "user", username)
-		newPassword, resetErr := m.resetONTAPUserPassword(ctx, username, opts)
-		if resetErr != nil {
-			return fmt.Errorf("failed to reset password for consistency: %w", resetErr)
-		}
-
-		// Update K8s secret with new password
-		return m.updateSecretInSeed(ctx, secretName, opts.svmSeedSecretNamespace, username, newPassword, opts.projectID)
-	}
-
-	m.log.Info("Password consistency validation successful", "svm", opts.projectID, "user", username)
+	// Since we can't directly validate ONTAP password we will skip this step, updating lead to too many issues.
+	m.log.Info("Password consistency validation skipped", "svm", opts.projectID, "user", username)
 	return nil
 }
 
