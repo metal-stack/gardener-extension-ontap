@@ -69,37 +69,36 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 	case *apiextensionsv1.CustomResourceDefinition:
 		if tridentCRDs[x.Name] {
 			extensionswebhook.LogMutation(m.logger, x.Kind, x.Namespace, x.Name)
-			return m.mutateObjectLabels(ctx, x.Labels, false, false)
+			return m.mutateObjectLabels(ctx, x.Labels, false)
 		}
 	case *appsv1.DaemonSet:
 		if x.Name != "trident-node-linux" || x.Namespace != "kube-system" {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true, true)
+		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
 	case *appsv1.Deployment:
 		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true, false)
+		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
 	}
 
 	return nil
 }
 
 // mutateObjectLabels adds labels to the given object
-func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string, criticalLabel, netpolLabel bool) error {
+func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string, podLabels bool) error {
 	if labels == nil {
 		labels = make(map[string]string)
 	}
 
 	labels[v1beta1constants.ShootNoCleanup] = strconv.FormatBool(true)
 	labels[mutatedByOntap] = strconv.FormatBool(true)
-	if criticalLabel {
+
+	if podLabels {
 		labels[v1beta1constants.LabelNodeCriticalComponent] = strconv.FormatBool(true)
-	}
-	if netpolLabel {
 		labels[v1beta1constants.LabelNetworkPolicyShootToAPIServer] = v1beta1constants.LabelNetworkPolicyAllowed
 		labels[v1beta1constants.LabelNetworkPolicyToDNS] = v1beta1constants.LabelNetworkPolicyAllowed
 	}
