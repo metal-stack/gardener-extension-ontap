@@ -608,3 +608,24 @@ spec:
   enableAutoBackendConfig: true
   iscsiSelfHealingInterval: "5m0s"
   iscsiSelfHealingWaitTime: "7m0s"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-trident-controller
+  namespace: kube-system
+spec:
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+  podSelector:
+    matchLabels:
+      app: controller.csi.trident.netapp.io
+  policyTypes:
+  - Ingress
+  - Egress
