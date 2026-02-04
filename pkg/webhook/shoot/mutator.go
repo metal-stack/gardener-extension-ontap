@@ -80,7 +80,7 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		x.Spec.Template.Spec.DNSPolicy = corev1.DNSDefault
 		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
 	case *appsv1.Deployment:
-		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
+		if (x.Name != "trident-controller" && x.Name != "snapshot-controller") || x.Namespace != "kube-system" {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
