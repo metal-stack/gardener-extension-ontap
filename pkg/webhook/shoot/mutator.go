@@ -89,15 +89,18 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 }
 
 // mutateObjectLabels adds labels to the given object
-func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string, criticalLabel bool) error {
+func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string, podLabels bool) error {
 	if labels == nil {
 		labels = make(map[string]string)
 	}
 
 	labels[v1beta1constants.ShootNoCleanup] = strconv.FormatBool(true)
 	labels[mutatedByOntap] = strconv.FormatBool(true)
-	if criticalLabel {
+
+	if podLabels {
 		labels[v1beta1constants.LabelNodeCriticalComponent] = strconv.FormatBool(true)
+		labels[v1beta1constants.LabelNetworkPolicyShootToAPIServer] = v1beta1constants.LabelNetworkPolicyAllowed
+		labels[v1beta1constants.LabelNetworkPolicyToDNS] = v1beta1constants.LabelNetworkPolicyAllowed
 	}
 
 	return nil

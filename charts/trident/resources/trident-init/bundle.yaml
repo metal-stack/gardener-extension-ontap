@@ -484,9 +484,6 @@ spec:
         networking.gardener.cloud/to-apiserver: allowed
         networking.gardener.cloud/to-public-networks: allowed
     spec:
-    # locally the trident operator cant reacht he api-server for some reason, used to work before
-      # hostNetwork: true
-      # dnsPolicy: ClusterFirstWithHostNet
       containers:
         - command:
             - /trident-operator
@@ -498,7 +495,7 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: trident-operator
-          image: netapp/trident-operator:25.06.1
+          image: docker.io/netapp/trident-operator:25.06.3
           imagePullPolicy: IfNotPresent
           name: trident-operator
           resources:
@@ -595,7 +592,7 @@ metadata:
     shoot.gardener.cloud/no-cleanup: "true"
 spec:
   namespace: kube-system
-  enableForceDetach: false
+  enableForceDetach: true
   IPv6: false
   k8sTimeout: 0
   httpRequestTimeout: "90s"
@@ -603,7 +600,7 @@ spec:
   autosupportInsecure: false
   logFormat: "text"
   disableAuditLog: true
-  debug: false
+  debug: true
   imagePullSecrets: []
   imagePullPolicy: IfNotPresent
   windows: false
@@ -611,3 +608,24 @@ spec:
   enableAutoBackendConfig: true
   iscsiSelfHealingInterval: "5m0s"
   iscsiSelfHealingWaitTime: "7m0s"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-trident-controller
+  namespace: kube-system
+spec:
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+  podSelector:
+    matchLabels:
+      app: controller.csi.trident.netapp.io
+  policyTypes:
+  - Ingress
+  - Egress
