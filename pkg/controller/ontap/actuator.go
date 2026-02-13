@@ -3,6 +3,7 @@ package ontap
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync/atomic"
 
@@ -28,6 +29,7 @@ import (
 
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
+	"github.com/metal-stack/ontap-go/api/client/storage"
 	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
 	corev1 "k8s.io/api/core/v1"
@@ -90,6 +92,8 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 		return nil, err
 	}
 
+	cvcMap := make(map[ontapv1.Ontap]int64)
+
 	// Get statistics of cluster, can be updated in the future to check the state or capacity to choose cluster for the client
 	for _, client := range *metroClusterClient {
 		cgparams := cluster.NewClusterGetParamsWithContext(ctx)
@@ -101,14 +105,39 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 
 		log.Info("Successfully connected to ONTAP cluster", "cluster", *clusterResponse.Name, "statistics", *clusterResponse.Statistics)
 
-		// for now just return the first client
-		// TODO create logic to switch between clients
-		if *clusterResponse.Statistics.Status == "ok" {
-			return &client, nil
+		sggparams := storage.NewAggregateCollectionGetParams()
+		sggparams.Fields = []string{"volume_count"}
+		sgok, err := client.Storage.AggregateCollectionGet(sggparams, nil)
+		if err != nil {
+			return nil, err
+		}
+		aggregateResponse := sgok.Payload
+
+		var volumeCount int64
+		for _, aggr := range aggregateResponse.AggregateResponseInlineRecords {
+			volumeCount += *aggr.VolumeCount
+
+		}
+		cvcMap[client] = volumeCount
+	}
+
+	var adminClient *ontapv1.Ontap
+	var minVolumes int64 = math.MaxInt64
+
+	for client, volumeCount := range cvcMap {
+		if volumeCount < minVolumes {
+			minVolumes = volumeCount
+			c := client
+			adminClient = &c
 		}
 	}
 
-	return nil, fmt.Errorf("couldn't initialize admin client")
+	if adminClient == nil {
+		return nil, fmt.Errorf("couldn't initialize admin client")
+	}
+
+	return adminClient, nil
+
 }
 
 // Reconcile handles extension creation and updates.
