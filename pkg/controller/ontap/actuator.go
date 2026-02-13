@@ -94,7 +94,6 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 
 	cvcMap := make(map[ontapv1.Ontap]int64)
 
-	// Get statistics of cluster, can be updated in the future to check the state or capacity to choose cluster for the client
 	for _, client := range *metroClusterClient {
 		cgparams := cluster.NewClusterGetParamsWithContext(ctx)
 		cgok, err := client.Cluster.ClusterGet(cgparams, nil)
