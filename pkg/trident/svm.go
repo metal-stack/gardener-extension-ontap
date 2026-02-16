@@ -8,7 +8,6 @@ import (
 
 	"github.com/avast/retry-go/v4"
 	"github.com/go-logr/logr"
-	"github.com/metal-stack/metal-lib/pkg/pointer"
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	"github.com/metal-stack/ontap-go/api/client/networking"
@@ -110,8 +109,8 @@ func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 			Name:                &opts.ProjectID,
 			SvmInlineAggregates: aggrArrayItem,
 			Nvme: &models.SvmInlineNvme{
-				Enabled: pointer.Pointer(true),
-				Allowed: pointer.Pointer(true),
+				Enabled: new(true),
+				Allowed: new(true),
 			},
 		},
 		Context: ctx,
@@ -222,10 +221,10 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 	params := networking.NewNetworkIPInterfacesCreateParamsWithContext(ctx)
 	// Create the basic interface structure
 	interfaceInfo := &models.IPInterface{
-		Name:    pointer.Pointer(opts.lifName),
-		Enabled: pointer.Pointer(true),
+		Name:    new(opts.lifName),
+		Enabled: new(true),
 		Svm: &models.IPInterfaceInlineSvm{
-			UUID: pointer.Pointer(opts.svmUUID),
+			UUID: new(opts.svmUUID),
 		},
 	}
 
@@ -240,12 +239,12 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 	netmask := "24"
 	if bgpres.Payload.NumRecords != nil && *bgpres.Payload.NumRecords != 0 {
 		netmask = "32"
-		interfaceInfo.Vip = pointer.Pointer(true)
+		interfaceInfo.Vip = new(true)
 	}
 
 	var (
-		address = pointer.Pointer(models.IPAddress(opts.ipAddress))
-		mask    = pointer.Pointer(models.IPNetmask(netmask))
+		address = new(models.IPAddress(opts.ipAddress))
+		mask    = new(models.IPNetmask(netmask))
 	)
 	interfaceInfo.IP = &models.IPInfo{
 		Address: address,
@@ -255,19 +254,19 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 	// Add location information
 	location := &models.IPInterfaceInlineLocation{}
 	location.HomeNode = &models.IPInterfaceInlineLocationInlineHomeNode{
-		UUID: pointer.Pointer(opts.nodeUUID),
+		UUID: new(opts.nodeUUID),
 	}
 	interfaceInfo.Location = location
 	if opts.isDataLif {
 		// NVMe/TCP policy
 		interfaceInfo.ServicePolicy = &models.IPInterfaceInlineServicePolicy{
-			Name: pointer.Pointer("default-data-nvme-tcp"),
+			Name: new("default-data-nvme-tcp"),
 		}
 	}
 	if !opts.isDataLif {
 		// Management policy
 		interfaceInfo.ServicePolicy = &models.IPInterfaceInlineServicePolicy{
-			Name: pointer.Pointer("default-management"),
+			Name: new("default-management"),
 		}
 	}
 	params.SetInfo(interfaceInfo)
