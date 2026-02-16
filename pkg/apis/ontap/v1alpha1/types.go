@@ -18,8 +18,8 @@ const (
 type TridentConfig struct {
 	metav1.TypeMeta `json:",inline"`
 
-	//SvmIpAddresses are the endpoints needed by the
-	SvmIpaddresses SvmIpaddresses `json:"svmIpaddresses,omitempty"`
+	//SvmIpAddresses are the endpoints needed by the trident csi driver to connect to the SVM
+	SvmIpaddresses SvmIpaddresses `json:"svmIpaddresses"`
 }
 
 // SvmIpaddresses contains the network interface addresses for a Storage Virtual Machine (SVM)

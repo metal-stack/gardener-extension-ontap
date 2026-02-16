@@ -8,7 +8,6 @@ import (
 
 	"github.com/sethvargo/go-password/password"
 
-	"github.com/metal-stack/metal-lib/pkg/pointer"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -55,12 +54,12 @@ func extractShootNameFromNamespace(namespace string) (string, error) {
 	}
 	withoutPrefix := strings.TrimPrefix(namespace, "shoot--")
 
-	idx := strings.Index(withoutPrefix, "--")
-	if idx == -1 {
+	_, after, ok := strings.Cut(withoutPrefix, "--")
+	if !ok {
 		return "", fmt.Errorf("invalid shoot namespace format, missing project separator: %s", namespace)
 	}
 
-	shootName := withoutPrefix[idx+2:]
+	shootName := after
 	if shootName == "" {
 		return "", fmt.Errorf("invalid shoot namespace format, missing shoot name: %s", namespace)
 	}
@@ -171,14 +170,14 @@ func (m *SvmManager) attemptUserCreation(ctx context.Context, opts ontapUserOpti
 
 	createAccountParams := security.NewAccountCreateParamsWithContext(ctx)
 	createAccountParams.SetInfo(&models.Account{
-		Name:     pointer.Pointer(opts.username),
+		Name:     new(opts.username),
 		Password: &pwdVal,
 		Role: &models.AccountInlineRole{
-			Name: pointer.Pointer(vsadminRole),
+			Name: new(vsadminRole),
 		},
-		Locked: pointer.Pointer(false),
+		Locked: new(false),
 		Owner: &models.AccountInlineOwner{
-			UUID: pointer.Pointer(opts.svmUUID),
+			UUID: new(opts.svmUUID),
 		},
 		AccountInlineApplications: []*models.AccountApplication{
 			{
@@ -305,8 +304,8 @@ func (m *SvmManager) CreateUserAndSecret(ctx context.Context, opts userAndSecret
 func (m *SvmManager) updateExistingUserPassword(ctx context.Context, username, svmName, password string) (string, error) {
 	secparams := security.NewAccountPasswordCreateParamsWithContext(ctx)
 	secparams.Info = &models.AccountPassword{
-		Name:     pointer.Pointer(username),
-		Password: pointer.Pointer(strfmt.Password(password)),
+		Name:     new(username),
+		Password: new(strfmt.Password(password)),
 		Owner: &models.AccountPasswordInlineOwner{
 			Name: &svmName,
 		},
