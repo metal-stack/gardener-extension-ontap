@@ -476,30 +476,71 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 		return nil, ErrSvmNotFound
 	}
 
-	namesToCheck := []string{svmName}
+	var (
+		primaryUUID  *string
+		fallbackUUID *string
+		fallbackName string
+	)
+
 	if !strings.HasSuffix(svmName, "-mc") {
-		namesToCheck = append(namesToCheck, fmt.Sprintf("%s-mc", svmName))
+		fallbackName = fmt.Sprintf("%s-mc", svmName)
 	}
 
-	for idx, nameToFind := range namesToCheck {
-		if idx == 0 {
-			m.log.Info("Checking for SVM with name", "name", nameToFind)
-		} else {
-			m.log.Info("Primary SVM name not found, trying fallback", "fallbackName", nameToFind)
+	for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
+		if svm.Name == nil || svm.UUID == nil {
+			continue
 		}
 
-		for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
-			if svm.Name != nil && *svm.Name == nameToFind {
-				if svm.UUID != nil {
-					m.log.Info("Found SVM", "name", nameToFind, "uuid", *svm.UUID)
-					return svm.UUID, nil
-				}
-			}
+		switch *svm.Name {
+		case svmName:
+			primaryUUID = svm.UUID
+		case fallbackName:
+			fallbackUUID = svm.UUID
 		}
 	}
 
-	m.log.Info("SVM not found after trying all known names", "requestedName", svmName, "attemptedNames", namesToCheck)
+	if primaryUUID != nil {
+		m.log.Info("Found primary SVM", "name", svmName, "uuid", *primaryUUID)
+		return primaryUUID, nil
+	}
+
+	if fallbackUUID != nil {
+		m.log.Info("Primary SVM not found, validating fallback SVM", "fallbackName", fallbackName, "uuid", *fallbackUUID)
+		state, err := m.getSVMStateByUUID(ctx, *fallbackUUID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get fallback SVM state for %q: %w", fallbackName, err)
+		}
+		if state == "running" {
+			m.log.Info("Using running fallback SVM", "fallbackName", fallbackName, "uuid", *fallbackUUID)
+			return fallbackUUID, nil
+		}
+
+		// In MetroCluster setups, passive-site mirror SVMs are typically "<name>-mc" and stopped.
+		// Ignore them so reconciliation can continue against the active site.
+		m.log.Info("Ignoring fallback SVM because it is not running", "fallbackName", fallbackName, "uuid", *fallbackUUID, "state", state)
+	}
+
+	attemptedNames := []string{svmName}
+	if fallbackName != "" {
+		attemptedNames = append(attemptedNames, fallbackName)
+	}
+	m.log.Info("SVM not found after trying all known names", "requestedName", svmName, "attemptedNames", attemptedNames)
 	return nil, ErrSvmNotFound
+}
+
+func (m *SvmManager) getSVMStateByUUID(ctx context.Context, svmUUID string) (string, error) {
+	getParams := s_vm.NewSvmGetParamsWithContext(ctx)
+	getParams.SetUUID(svmUUID)
+
+	svmInfo, err := m.ontapClient.SVM.SvmGet(getParams, nil)
+	if err != nil {
+		return "", err
+	}
+	if svmInfo.Payload == nil || svmInfo.Payload.State == nil {
+		return "", fmt.Errorf("SVM state information is missing")
+	}
+
+	return *svmInfo.Payload.State, nil
 }
 
 // waitForSvmReady polls until the SVM exists and is in a "running" state.
