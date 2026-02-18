@@ -114,6 +114,9 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 
 		var volumeCount int64
 		for _, aggr := range aggregateResponse.AggregateResponseInlineRecords {
+			if aggr.VolumeCount == nil {
+				continue
+			}
 			volumeCount += *aggr.VolumeCount
 
 		}
