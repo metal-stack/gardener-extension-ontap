@@ -3,7 +3,6 @@ package ontap
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 	"sync/atomic"
 
@@ -29,7 +28,6 @@ import (
 
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
-	"github.com/metal-stack/ontap-go/api/client/storage"
 	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
 	corev1 "k8s.io/api/core/v1"
@@ -38,8 +36,7 @@ import (
 // FIXME here the logic to deploy the trident operator
 
 type actuator struct {
-	writeClient        *ontapv1.Ontap
-	readClients        []*ontapv1.Ontap
+	clients            []*ontapv1.Ontap
 	client             client.Client
 	decoder            runtime.Decoder
 	config             config.ControllerConfiguration
@@ -50,14 +47,13 @@ const ShootWebhooksResourceName = "extension-ontap-shoot"
 
 // NewActuator returns an actuator responsible for Extension resources.
 func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration, shootWebhookConfig *atomic.Value) (extension.Actuator, error) {
-	writeClient, readClients, err := createAdminClient(ctx, config)
+	clients, err := createAdminClient(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	return &actuator{
-		writeClient:        writeClient,
-		readClients:        readClients,
+		clients:            clients,
 		client:             mgr.GetClient(),
 		decoder:            serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
 		config:             config,
@@ -65,10 +61,10 @@ func NewActuator(ctx context.Context, mgr manager.Manager, config config.Control
 	}, nil
 }
 
-func createAdminClient(ctx context.Context, config config.ControllerConfiguration) (*ontapv1.Ontap, []*ontapv1.Ontap, error) {
+func createAdminClient(ctx context.Context, config config.ControllerConfiguration) ([]*ontapv1.Ontap, error) {
 	err := config.Validate()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var (
@@ -91,58 +87,35 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 
 	metroClusterClient, err := ontapclient.NewMetroClusterClient(ontapConfigs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if metroClusterClient == nil || len(*metroClusterClient) == 0 {
-		return nil, nil, fmt.Errorf("couldn't initialize any ONTAP clients")
+		return nil, fmt.Errorf("couldn't initialize any ONTAP clients")
 	}
 
-	readClients := make([]*ontapv1.Ontap, 0, len(*metroClusterClient))
-	var writeClient *ontapv1.Ontap
-	var minVolumes int64 = math.MaxInt64
+	clients := make([]*ontapv1.Ontap, 0, len(*metroClusterClient))
 
 	for i := range *metroClusterClient {
 		client := &(*metroClusterClient)[i]
-		readClients = append(readClients, client)
 
 		cgparams := cluster.NewClusterGetParamsWithContext(ctx)
 		cgok, err := client.Cluster.ClusterGet(cgparams, nil)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		clusterResponse := cgok.Payload
 
 		log.Info("Successfully connected to ONTAP cluster", "cluster", *clusterResponse.Name, "statistics", *clusterResponse.Statistics)
 
-		sggparams := storage.NewAggregateCollectionGetParams()
-		sggparams.Fields = []string{"volume_count"}
-		sgok, err := client.Storage.AggregateCollectionGet(sggparams, nil)
-		if err != nil {
-			return nil, nil, err
-		}
-		aggregateResponse := sgok.Payload
-
-		var volumeCount int64
-		for _, aggr := range aggregateResponse.AggregateResponseInlineRecords {
-			if aggr.VolumeCount == nil {
-				continue
-			}
-			volumeCount += *aggr.VolumeCount
-
-		}
-		if volumeCount < minVolumes {
-			minVolumes = volumeCount
-			writeClient = client
-		}
+		clients = append(clients, client)
 	}
 
-	if writeClient == nil {
-		return nil, nil, fmt.Errorf("couldn't initialize admin client")
+	if len(clients) == 0 {
+		return nil, fmt.Errorf("couldn't initialize any ONTAP clients")
 	}
 
-	return writeClient, readClients, nil
-
+	return clients, nil
 }
 
 // Reconcile handles extension creation and updates.
@@ -270,7 +243,7 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 
 // ensureSvmForProject ensures a complete SVM exists with all required components
 func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, shootNamespace string, svmSeedSecretNamespace string) error {
-	svnManager := trident.NewSvmManager(log, a.writeClient, a.readClients, a.client)
+	svmManager := trident.NewSvmManager(log, a.clients, a.client)
 
 	svmOpts := trident.CreateSVMOptions{
 		ProjectID:              projectId,
@@ -279,7 +252,7 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, Svm
 		SvmSeedSecretNamespace: svmSeedSecretNamespace,
 	}
 
-	if err := svnManager.EnsureCompleteSVM(ctx, svmOpts); err != nil {
+	if err := svmManager.EnsureCompleteSVM(ctx, svmOpts); err != nil {
 		return fmt.Errorf("failed to ensure complete SVM for project %s shoot namespace %s: %w", projectId, shootNamespace, err)
 	}
 

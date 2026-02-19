@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"github.com/avast/retry-go/v4"
+
 	"github.com/go-logr/logr"
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
@@ -57,25 +59,68 @@ type networkInterfaceOptions struct {
 }
 
 type SvmManager struct {
-	log         logr.Logger
-	ontapClient *ontapv1.Ontap
-	seedClient  client.Client
+	log        logr.Logger
+	clients    []*ontapv1.Ontap
+	seedClient client.Client
 }
 
-func NewSvmManager(log logr.Logger, ontapClient *ontapv1.Ontap, seedClient client.Client) *SvmManager {
+func NewSvmManager(log logr.Logger, clients []*ontapv1.Ontap, seedClient client.Client) *SvmManager {
 	return &SvmManager{
-		log:         log,
-		ontapClient: ontapClient,
-		seedClient:  seedClient,
+		log:        log,
+		clients:    clients,
+		seedClient: seedClient,
 	}
+}
+
+// getWriteClient dynamically selects the client with the fewest total volumes.
+func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error) {
+	var (
+		bestClient *ontapv1.Ontap
+		minVolumes int64 = math.MaxInt64
+	)
+
+	for _, c := range m.clients {
+		params := storage.NewAggregateCollectionGetParamsWithContext(ctx)
+		params.Fields = []string{"volume_count"}
+
+		result, err := c.Storage.AggregateCollectionGet(params, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get aggregate volume counts: %w", err)
+		}
+
+		var volumeCount int64
+		for _, aggr := range result.Payload.AggregateResponseInlineRecords {
+			if aggr.VolumeCount == nil {
+				continue
+			}
+			volumeCount += *aggr.VolumeCount
+		}
+
+		if volumeCount < minVolumes {
+			minVolumes = volumeCount
+			bestClient = c
+		}
+	}
+
+	if bestClient == nil {
+		return nil, fmt.Errorf("no suitable write client found")
+	}
+
+	return bestClient, nil
 }
 
 // CreateSVM creates an SVM and sets up network interfaces on a selected node
 func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error {
 	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLifs", opts.SvmIpaddresses.DataLifs)
 
+	// 0. Dynamically select the write target based on volume counts
+	writeClient, err := m.getWriteClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to select write client: %w", err)
+	}
+
 	// 1. Get a node for network interface placement and aggregate selection
-	nodesUUIDs, err := m.getAllNodesInCluster(ctx)
+	nodesUUIDs, err := m.getAllNodesInCluster(ctx, writeClient)
 	if err != nil {
 		return fmt.Errorf("failed to get a node for SVM creation: %w", err)
 	}
@@ -84,7 +129,7 @@ func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	// Ontap uses all aggregates per default to assign aggregates.
 	agrgp := storage.NewAggregateCollectionGetParamsWithContext(ctx)
 	// Got these from the Swagger UI, i don't think there is another way
-	agrcget, err := m.ontapClient.Storage.AggregateCollectionGet(agrgp, nil)
+	agrcget, err := writeClient.Storage.AggregateCollectionGet(agrgp, nil)
 	if err != nil {
 		return err
 	}
@@ -118,7 +163,7 @@ func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 	}
 
 	m.log.Info("Sending SVM create request", "params", fmt.Sprintf("%+v", params))
-	if _, _, err = m.ontapClient.SVM.SvmCreate(params, nil); err != nil {
+	if _, _, err = writeClient.SVM.SvmCreate(params, nil); err != nil {
 		return fmt.Errorf("failed to create SVM %s: %w", opts.ProjectID, err)
 	}
 
@@ -142,7 +187,7 @@ func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 			nodeUUID:  selectedNodeUUID,
 			isDataLif: true,
 		}
-		if err := m.createNetworkInterfaceForSvm(ctx, dataLifOpts); err != nil {
+		if err := m.createNetworkInterfaceForSvm(ctx, writeClient, dataLifOpts); err != nil {
 			return fmt.Errorf("failed to create data LIF for SVM %s: %w", opts.ProjectID, err)
 		}
 	}
@@ -156,7 +201,7 @@ func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		nodeUUID:  nodesUUIDs[0],
 		isDataLif: false,
 	}
-	if err := m.createNetworkInterfaceForSvm(ctx, mgmtLifOpts); err != nil {
+	if err := m.createNetworkInterfaceForSvm(ctx, writeClient, mgmtLifOpts); err != nil {
 		return fmt.Errorf("failed to create management LIF for SVM %s: %w", opts.ProjectID, err)
 	}
 
@@ -169,7 +214,7 @@ func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 		seedClient:             m.seedClient,
 		svmUUID:                svmUUID,
 	}
-	if err := m.CreateUserAndSecret(ctx, userOpts); err != nil {
+	if err := m.CreateUserAndSecret(ctx, writeClient, userOpts); err != nil {
 		return fmt.Errorf("SVM %s created, but failed to create user and secret: %w", opts.ProjectID, err)
 	}
 
@@ -179,14 +224,14 @@ func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 
 // getAllNodesInCluster fetches the first node name found in the ONTAP cluster
 // Needs to be changed, waiting for Netapp answer
-func (m *SvmManager) getAllNodesInCluster(ctx context.Context) ([]string, error) {
+func (m *SvmManager) getAllNodesInCluster(ctx context.Context, ontapClient *ontapv1.Ontap) ([]string, error) {
 	m.log.Info("Fetching first available node in cluster...")
 
 	var nodeUUIDs []string
 	params := cluster.NewNodesGetParamsWithContext(ctx)
 	params.SetFields([]string{"uuid", "name"})
 
-	result, err := m.ontapClient.Cluster.NodesGet(params, nil)
+	result, err := ontapClient.Cluster.NodesGet(params, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch nodes: %w", err)
 	}
@@ -215,7 +260,7 @@ func (m *SvmManager) getAllNodesInCluster(ctx context.Context) ([]string, error)
 }
 
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
-func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts networkInterfaceOptions) error {
+func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, ontapClient *ontapv1.Ontap, opts networkInterfaceOptions) error {
 
 	m.log.Info("Creating network interface", "svm", opts.svmName, "lifName", opts.lifName, "ip", opts.ipAddress, "node", opts.nodeUUID)
 
@@ -230,7 +275,7 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 	}
 
 	paramsBgp := networking.NewNetworkIPBgpPeerGroupsGetParamsWithContext(ctx)
-	bgpres, err := m.ontapClient.Networking.NetworkIPBgpPeerGroupsGet(paramsBgp, nil)
+	bgpres, err := ontapClient.Networking.NetworkIPBgpPeerGroupsGet(paramsBgp, nil)
 	if err != nil {
 		return err
 	}
@@ -271,7 +316,7 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 		}
 	}
 	params.SetInfo(interfaceInfo)
-	if _, err := m.ontapClient.Networking.NetworkIPInterfacesCreate(params, nil); err != nil {
+	if _, err := ontapClient.Networking.NetworkIPInterfacesCreate(params, nil); err != nil {
 		return fmt.Errorf("failed to create network interface %s for SVM %s: %w", opts.lifName, opts.svmName, err)
 	}
 
@@ -280,27 +325,27 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, opts netw
 }
 
 // validateAndEnsureCompleteSVMState validates all components of an SVM and creates missing parts
-func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, svmUUID, svmName string, opts CreateSVMOptions) error {
+func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, activeClient *ontapv1.Ontap, svmUUID, svmName string, opts CreateSVMOptions) error {
 	m.log.Info("Validating complete SVM state", "svmName", svmName, "uuid", svmUUID)
 
 	// 1. Validate SVM is running and NVMe enabled
-	if err := m.validateSVMRunningState(ctx, svmUUID, svmName); err != nil {
+	if err := m.validateSVMRunningState(ctx, activeClient, svmUUID, svmName); err != nil {
 		return err
 	}
 
 	// 2. Get cluster nodes for LIF creation (if needed)
-	nodesUUIDs, err := m.getAllNodesInCluster(ctx)
+	nodesUUIDs, err := m.getAllNodesInCluster(ctx, activeClient)
 	if err != nil {
 		return fmt.Errorf("failed to get cluster nodes for SVM validation: %w", err)
 	}
 
 	// 3. Validate and ensure data LIFs exist
-	if err := m.validateAndEnsureDataLIFs(ctx, svmUUID, svmName, opts.SvmIpaddresses.DataLifs, nodesUUIDs); err != nil {
+	if err := m.validateAndEnsureDataLIFs(ctx, activeClient, svmUUID, svmName, opts.SvmIpaddresses.DataLifs, nodesUUIDs); err != nil {
 		return err
 	}
 
 	// 4. Validate and ensure management LIF exists
-	if err := m.validateAndEnsureManagementLIF(ctx, svmUUID, svmName, opts.SvmIpaddresses.ManagementLif, nodesUUIDs[0]); err != nil {
+	if err := m.validateAndEnsureManagementLIF(ctx, activeClient, svmUUID, svmName, opts.SvmIpaddresses.ManagementLif, nodesUUIDs[0]); err != nil {
 		return err
 	}
 
@@ -311,7 +356,7 @@ func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, svmU
 		seedClient:             m.seedClient,
 		svmUUID:                svmUUID,
 	}
-	if err := m.CreateUserAndSecret(ctx, userOpts); err != nil {
+	if err := m.CreateUserAndSecret(ctx, activeClient, userOpts); err != nil {
 		return fmt.Errorf("failed to ensure user and secret for SVM %s: %w", svmName, err)
 	}
 
@@ -320,11 +365,11 @@ func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, svmU
 }
 
 // validateSVMRunningState checks if SVM is in running state with NVMe enabled
-func (m *SvmManager) validateSVMRunningState(ctx context.Context, svmUUID, svmName string) error {
+func (m *SvmManager) validateSVMRunningState(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID, svmName string) error {
 	getParams := s_vm.NewSvmGetParamsWithContext(ctx)
 	getParams.SetUUID(svmUUID)
 
-	svmInfo, err := m.ontapClient.SVM.SvmGet(getParams, nil)
+	svmInfo, err := ontapClient.SVM.SvmGet(getParams, nil)
 	if err != nil {
 		return fmt.Errorf("failed to get SVM details for validation: %w", err)
 	}
@@ -342,13 +387,13 @@ func (m *SvmManager) validateSVMRunningState(ctx context.Context, svmUUID, svmNa
 }
 
 // getExistingNetworkInterfaces gets all network interfaces for an SVM
-func (m *SvmManager) getExistingNetworkInterfaces(ctx context.Context, svmUUID string) (map[string]string, error) {
+func (m *SvmManager) getExistingNetworkInterfaces(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID string) (map[string]string, error) {
 	params := networking.NewNetworkIPInterfacesGetParamsWithContext(ctx)
 	params.SetSvmUUID(&svmUUID)
 	fields := []string{"name", "ip.address"}
 	params.SetFields(fields)
 
-	result, err := m.ontapClient.Networking.NetworkIPInterfacesGet(params, nil)
+	result, err := ontapClient.Networking.NetworkIPInterfacesGet(params, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get network interfaces: %w", err)
 	}
@@ -366,8 +411,8 @@ func (m *SvmManager) getExistingNetworkInterfaces(ctx context.Context, svmUUID s
 }
 
 // validateAndEnsureDataLIFs validates all expected data LIFs exist and creates missing ones
-func (m *SvmManager) validateAndEnsureDataLIFs(ctx context.Context, svmUUID, svmName string, expectedDataLifs []string, nodesUUIDs []string) error {
-	existingInterfaces, err := m.getExistingNetworkInterfaces(ctx, svmUUID)
+func (m *SvmManager) validateAndEnsureDataLIFs(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID, svmName string, expectedDataLifs []string, nodesUUIDs []string) error {
+	existingInterfaces, err := m.getExistingNetworkInterfaces(ctx, ontapClient, svmUUID)
 	if err != nil {
 		return err
 	}
@@ -396,7 +441,7 @@ func (m *SvmManager) validateAndEnsureDataLIFs(ctx context.Context, svmUUID, svm
 			nodeUUID:  selectedNodeUUID,
 			isDataLif: true,
 		}
-		if err := m.createNetworkInterfaceForSvm(ctx, dataLifOpts); err != nil {
+		if err := m.createNetworkInterfaceForSvm(ctx, ontapClient, dataLifOpts); err != nil {
 			return fmt.Errorf("failed to create missing data LIF %s: %w", expectedLifName, err)
 		}
 	}
@@ -405,8 +450,8 @@ func (m *SvmManager) validateAndEnsureDataLIFs(ctx context.Context, svmUUID, svm
 }
 
 // validateAndEnsureManagementLIF validates management LIF exists and creates if missing
-func (m *SvmManager) validateAndEnsureManagementLIF(ctx context.Context, svmUUID, svmName, managementIP, nodeUUID string) error {
-	existingInterfaces, err := m.getExistingNetworkInterfaces(ctx, svmUUID)
+func (m *SvmManager) validateAndEnsureManagementLIF(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID, svmName, managementIP, nodeUUID string) error {
+	existingInterfaces, err := m.getExistingNetworkInterfaces(ctx, ontapClient, svmUUID)
 	if err != nil {
 		return err
 	}
@@ -431,7 +476,7 @@ func (m *SvmManager) validateAndEnsureManagementLIF(ctx context.Context, svmUUID
 		nodeUUID:  nodeUUID,
 		isDataLif: false,
 	}
-	if err := m.createNetworkInterfaceForSvm(ctx, mgmtLifOpts); err != nil {
+	if err := m.createNetworkInterfaceForSvm(ctx, ontapClient, mgmtLifOpts); err != nil {
 		return fmt.Errorf("failed to create missing management LIF: %w", err)
 	}
 
@@ -443,7 +488,7 @@ func (m *SvmManager) EnsureCompleteSVM(ctx context.Context, opts CreateSVMOption
 	m.log.Info("Ensuring complete SVM state", "projectId", opts.ProjectID)
 
 	// First check if SVM exists
-	existingUUID, err := m.GetSVMByName(ctx, opts.ProjectID)
+	existingUUID, foundClient, err := m.GetSVMByName(ctx, opts.ProjectID)
 	if err != nil {
 		if errors.Is(err, ErrSvmNotFound) {
 			// SVM doesn't exist, create it completely
@@ -455,91 +500,87 @@ func (m *SvmManager) EnsureCompleteSVM(ctx context.Context, opts CreateSVMOption
 
 	// SVM exists, validate and ensure all components are complete
 	m.log.Info("SVM exists, validating completeness", "projectId", opts.ProjectID, "uuid", *existingUUID)
-	return m.validateAndEnsureCompleteSVMState(ctx, *existingUUID, opts.ProjectID, opts)
+	return m.validateAndEnsureCompleteSVMState(ctx, foundClient, *existingUUID, opts.ProjectID, opts)
 }
 
-// Returns a svm by inputting the svmName, i.e. projectId
-func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string, error) {
-	if m.ontapClient == nil || m.ontapClient.SVM == nil {
-		return nil, fmt.Errorf("API client or SVM service is not initialized")
-	}
-
-	params := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
-	svmGetOK, err := m.ontapClient.SVM.SvmCollectionGet(params, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch SVMs: %w", err)
-	}
-
-	if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
-		m.log.Info("No SVMs found in the response")
-		return nil, ErrSvmNotFound
-	}
-
-	var (
-		primaryUUID  *string
-		fallbackUUID *string
-		fallbackName string
-	)
-
+// GetSVMByName searches all clients for a running SVM matching svmName (or svmName-mc).
+// Returns the UUID, the ONTAP client where the SVM is running, and an error.
+func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string, *ontapv1.Ontap, error) {
+	var fallbackName string
 	if !strings.HasSuffix(svmName, "-mc") {
 		fallbackName = fmt.Sprintf("%s-mc", svmName)
 	}
 
-	for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
-		if svm.Name == nil || svm.UUID == nil {
+	for _, rc := range m.clients {
+		if rc == nil || rc.SVM == nil {
 			continue
 		}
 
-		switch *svm.Name {
-		case svmName:
-			primaryUUID = svm.UUID
-		case fallbackName:
-			fallbackUUID = svm.UUID
-		}
-	}
-
-	if primaryUUID != nil {
-		m.log.Info("Found primary SVM", "name", svmName, "uuid", *primaryUUID)
-		return primaryUUID, nil
-	}
-
-	if fallbackUUID != nil {
-		m.log.Info("Primary SVM not found, validating fallback SVM", "fallbackName", fallbackName, "uuid", *fallbackUUID)
-		state, err := m.getSVMStateByUUID(ctx, *fallbackUUID)
+		params := s_vm.NewSvmCollectionGetParamsWithContext(ctx)
+		svmGetOK, err := rc.SVM.SvmCollectionGet(params, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get fallback SVM state for %q: %w", fallbackName, err)
-		}
-		if state == "running" {
-			m.log.Info("Using running fallback SVM", "fallbackName", fallbackName, "uuid", *fallbackUUID)
-			return fallbackUUID, nil
+			m.log.Error(err, "failed to fetch SVMs from client, trying next")
+			continue
 		}
 
-		// In MetroCluster setups, passive-site mirror SVMs are typically "<name>-mc" and stopped.
-		// Ignore them so reconciliation can continue against the active site.
-		m.log.Info("Ignoring fallback SVM because it is not running", "fallbackName", fallbackName, "uuid", *fallbackUUID, "state", state)
+		if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
+			continue
+		}
+
+		var (
+			primaryUUID  *string
+			fallbackUUID *string
+		)
+
+		for _, svm := range svmGetOK.Payload.SvmResponseInlineRecords {
+			if svm.Name == nil || svm.UUID == nil {
+				continue
+			}
+			switch *svm.Name {
+			case svmName:
+				primaryUUID = svm.UUID
+			case fallbackName:
+				fallbackUUID = svm.UUID
+			}
+		}
+
+		// Check primary name first, then fallback (-mc)
+		for _, candidate := range []struct {
+			uuid *string
+			name string
+		}{
+			{primaryUUID, svmName},
+			{fallbackUUID, fallbackName},
+		} {
+			if candidate.uuid == nil {
+				continue
+			}
+
+			getParams := s_vm.NewSvmGetParamsWithContext(ctx)
+			getParams.SetUUID(*candidate.uuid)
+
+			svmInfo, err := rc.SVM.SvmGet(getParams, nil)
+			if err != nil {
+				m.log.Error(err, "failed to get SVM state", "name", candidate.name, "uuid", *candidate.uuid)
+				continue
+			}
+			if svmInfo.Payload == nil || svmInfo.Payload.State == nil {
+				continue
+			}
+			if *svmInfo.Payload.State == "running" {
+				m.log.Info("Found running SVM", "name", candidate.name, "uuid", *candidate.uuid)
+				return candidate.uuid, rc, nil
+			}
+			m.log.Info("Ignoring SVM because it is not running", "name", candidate.name, "uuid", *candidate.uuid, "state", *svmInfo.Payload.State)
+		}
 	}
 
 	attemptedNames := []string{svmName}
 	if fallbackName != "" {
 		attemptedNames = append(attemptedNames, fallbackName)
 	}
-	m.log.Info("SVM not found after trying all known names", "requestedName", svmName, "attemptedNames", attemptedNames)
-	return nil, ErrSvmNotFound
-}
-
-func (m *SvmManager) getSVMStateByUUID(ctx context.Context, svmUUID string) (string, error) {
-	getParams := s_vm.NewSvmGetParamsWithContext(ctx)
-	getParams.SetUUID(svmUUID)
-
-	svmInfo, err := m.ontapClient.SVM.SvmGet(getParams, nil)
-	if err != nil {
-		return "", err
-	}
-	if svmInfo.Payload == nil || svmInfo.Payload.State == nil {
-		return "", fmt.Errorf("SVM state information is missing")
-	}
-
-	return *svmInfo.Payload.State, nil
+	m.log.Info("SVM not found after trying all known names on all clients", "requestedName", svmName, "attemptedNames", attemptedNames)
+	return nil, nil, ErrSvmNotFound
 }
 
 // waitForSvmReady polls until the SVM exists and is in a "running" state.
@@ -548,7 +589,7 @@ func (m *SvmManager) waitForSvmReady(ctx context.Context, svmName string) (strin
 
 	var uuid string
 	err := retry.Do(func() error {
-		svmUUID, err := m.GetSVMByName(ctx, svmName)
+		svmUUID, foundClient, err := m.GetSVMByName(ctx, svmName)
 		if err != nil {
 			if errors.Is(err, ErrSvmNotFound) {
 				m.log.Info("SVM not found by name yet, retrying...", "svmName", svmName)
@@ -561,7 +602,7 @@ func (m *SvmManager) waitForSvmReady(ctx context.Context, svmName string) (strin
 		getParams := s_vm.NewSvmGetParamsWithContext(ctx)
 		getParams.SetUUID(*svmUUID)
 
-		svmInfo, err := m.ontapClient.SVM.SvmGet(getParams, nil)
+		svmInfo, err := foundClient.SVM.SvmGet(getParams, nil)
 		if err != nil {
 			m.log.Error(err, "Failed to get SVM details after finding by name, retrying...", "svmName", svmName, "uuid", svmUUID)
 			return err
@@ -569,7 +610,7 @@ func (m *SvmManager) waitForSvmReady(ctx context.Context, svmName string) (strin
 
 		if svmInfo.Payload == nil || svmInfo.Payload.State == nil {
 			m.log.Info("SVM found, but state information is missing, retrying...", "svmName", svmName)
-			return err
+			return fmt.Errorf("SVM found but state information is missing")
 		}
 
 		currentState := *svmInfo.Payload.State
