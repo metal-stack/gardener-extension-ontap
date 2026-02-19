@@ -38,7 +38,8 @@ import (
 // FIXME here the logic to deploy the trident operator
 
 type actuator struct {
-	ontap              *ontapv1.Ontap
+	writeClient        *ontapv1.Ontap
+	readClients        []*ontapv1.Ontap
 	client             client.Client
 	decoder            runtime.Decoder
 	config             config.ControllerConfiguration
@@ -49,13 +50,14 @@ const ShootWebhooksResourceName = "extension-ontap-shoot"
 
 // NewActuator returns an actuator responsible for Extension resources.
 func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration, shootWebhookConfig *atomic.Value) (extension.Actuator, error) {
-	ontapClient, err := createAdminClient(ctx, config)
+	writeClient, readClients, err := createAdminClient(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	return &actuator{
-		ontap:              ontapClient,
+		writeClient:        writeClient,
+		readClients:        readClients,
 		client:             mgr.GetClient(),
 		decoder:            serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
 		config:             config,
@@ -63,10 +65,10 @@ func NewActuator(ctx context.Context, mgr manager.Manager, config config.Control
 	}, nil
 }
 
-func createAdminClient(ctx context.Context, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
+func createAdminClient(ctx context.Context, config config.ControllerConfiguration) (*ontapv1.Ontap, []*ontapv1.Ontap, error) {
 	err := config.Validate()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var (
@@ -89,16 +91,25 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 
 	metroClusterClient, err := ontapclient.NewMetroClusterClient(ontapConfigs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	cvcMap := make(map[ontapv1.Ontap]int64)
+	if metroClusterClient == nil || len(*metroClusterClient) == 0 {
+		return nil, nil, fmt.Errorf("couldn't initialize any ONTAP clients")
+	}
 
-	for _, client := range *metroClusterClient {
+	readClients := make([]*ontapv1.Ontap, 0, len(*metroClusterClient))
+	var writeClient *ontapv1.Ontap
+	var minVolumes int64 = math.MaxInt64
+
+	for i := range *metroClusterClient {
+		client := &(*metroClusterClient)[i]
+		readClients = append(readClients, client)
+
 		cgparams := cluster.NewClusterGetParamsWithContext(ctx)
 		cgok, err := client.Cluster.ClusterGet(cgparams, nil)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		clusterResponse := cgok.Payload
 
@@ -108,7 +119,7 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 		sggparams.Fields = []string{"volume_count"}
 		sgok, err := client.Storage.AggregateCollectionGet(sggparams, nil)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		aggregateResponse := sgok.Payload
 
@@ -120,25 +131,17 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 			volumeCount += *aggr.VolumeCount
 
 		}
-		cvcMap[client] = volumeCount
-	}
-
-	var adminClient *ontapv1.Ontap
-	var minVolumes int64 = math.MaxInt64
-
-	for client, volumeCount := range cvcMap {
 		if volumeCount < minVolumes {
 			minVolumes = volumeCount
-			c := client
-			adminClient = &c
+			writeClient = client
 		}
 	}
 
-	if adminClient == nil {
-		return nil, fmt.Errorf("couldn't initialize admin client")
+	if writeClient == nil {
+		return nil, nil, fmt.Errorf("couldn't initialize admin client")
 	}
 
-	return adminClient, nil
+	return writeClient, readClients, nil
 
 }
 
@@ -267,7 +270,7 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 
 // ensureSvmForProject ensures a complete SVM exists with all required components
 func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, shootNamespace string, svmSeedSecretNamespace string) error {
-	svnManager := trident.NewSvmManager(log, a.ontap, a.client)
+	svnManager := trident.NewSvmManager(log, a.writeClient, a.readClients, a.client)
 
 	svmOpts := trident.CreateSVMOptions{
 		ProjectID:              projectId,
