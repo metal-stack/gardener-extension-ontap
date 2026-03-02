@@ -95,6 +95,7 @@ func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error)
 			}
 			volumeCount += *aggr.VolumeCount
 		}
+		m.log.Info("client with volume count", "client", c, "volume_count", volumeCount)
 
 		if volumeCount < minVolumes {
 			minVolumes = volumeCount
@@ -106,6 +107,7 @@ func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error)
 		return nil, fmt.Errorf("no suitable write client found")
 	}
 
+	m.log.Info("using client", "client", bestClient)
 	return bestClient, nil
 }
 
