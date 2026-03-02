@@ -545,33 +545,11 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 		}
 
 		// Check primary name first, then fallback (-mc)
-		for _, candidate := range []struct {
-			uuid *string
-			name string
-		}{
-			{primaryUUID, svmName},
-			{fallbackUUID, fallbackName},
-		} {
-			if candidate.uuid == nil {
-				continue
-			}
-
-			getParams := s_vm.NewSvmGetParamsWithContext(ctx)
-			getParams.SetUUID(*candidate.uuid)
-
-			svmInfo, err := rc.SVM.SvmGet(getParams, nil)
-			if err != nil {
-				m.log.Error(err, "failed to get SVM state", "name", candidate.name, "uuid", *candidate.uuid)
-				continue
-			}
-			if svmInfo.Payload == nil || svmInfo.Payload.State == nil {
-				continue
-			}
-			if *svmInfo.Payload.State == "running" {
-				m.log.Info("Found running SVM", "name", candidate.name, "uuid", *candidate.uuid)
-				return candidate.uuid, rc, nil
-			}
-			m.log.Info("Ignoring SVM because it is not running", "name", candidate.name, "uuid", *candidate.uuid, "state", *svmInfo.Payload.State)
+		if uuid, ok := m.isRunningSVM(ctx, rc, primaryUUID, svmName); ok {
+			return uuid, rc, nil
+		}
+		if uuid, ok := m.isRunningSVM(ctx, rc, fallbackUUID, fallbackName); ok {
+			return uuid, rc, nil
 		}
 	}
 
@@ -581,6 +559,33 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 	}
 	m.log.Info("SVM not found after trying all known names on all clients", "requestedName", svmName, "attemptedNames", attemptedNames)
 	return nil, nil, ErrSvmNotFound
+}
+
+// isRunningSVM checks whether a single SVM candidate is in "running" state.
+// Returns the UUID and true if it is running, nil and false otherwise.
+func (m *SvmManager) isRunningSVM(ctx context.Context, ontapClient *ontapv1.Ontap, uuid *string, name string) (*string, bool) {
+	if uuid == nil {
+		return nil, false
+	}
+
+	getParams := s_vm.NewSvmGetParamsWithContext(ctx)
+	getParams.SetUUID(*uuid)
+
+	svmInfo, err := ontapClient.SVM.SvmGet(getParams, nil)
+	if err != nil {
+		m.log.Error(err, "failed to get SVM state", "name", name, "uuid", *uuid)
+		return nil, false
+	}
+	if svmInfo.Payload == nil || svmInfo.Payload.State == nil {
+		return nil, false
+	}
+	if *svmInfo.Payload.State == "running" {
+		m.log.Info("Found running SVM", "name", name, "uuid", *uuid)
+		return uuid, true
+	}
+
+	m.log.Info("Ignoring SVM because it is not running", "name", name, "uuid", *uuid, "state", *svmInfo.Payload.State)
+	return nil, false
 }
 
 // waitForSvmReady polls until the SVM exists and is in a "running" state.
