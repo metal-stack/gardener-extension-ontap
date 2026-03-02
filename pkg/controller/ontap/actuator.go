@@ -94,10 +94,11 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 		return nil, fmt.Errorf("couldn't initialize any ONTAP clients")
 	}
 
-	clients := make([]*ontapv1.Ontap, 0, len(*metroClusterClient))
+	mcClients := *metroClusterClient
+	var clients []*ontapv1.Ontap
 
-	for i := range *metroClusterClient {
-		client := &(*metroClusterClient)[i]
+	for i := range mcClients {
+		client := &mcClients[i]
 
 		cgparams := cluster.NewClusterGetParamsWithContext(ctx)
 		cgok, err := client.Cluster.ClusterGet(cgparams, nil)
