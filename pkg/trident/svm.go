@@ -81,7 +81,7 @@ func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error)
 
 	for _, c := range m.clients {
 		params := storage.NewAggregateCollectionGetParamsWithContext(ctx)
-		params.Fields = []string{"volume_count"}
+		params.Fields = []string{"volume-count"}
 
 		result, err := c.Storage.AggregateCollectionGet(params, nil)
 		if err != nil {
@@ -89,13 +89,15 @@ func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error)
 		}
 
 		var volumeCount int64
+		var nilCount int
 		for _, aggr := range result.Payload.AggregateResponseInlineRecords {
 			if aggr.VolumeCount == nil {
+				nilCount++
 				continue
 			}
 			volumeCount += *aggr.VolumeCount
 		}
-		m.log.Info("client with volume count", "client", c, "volume_count", volumeCount)
+		m.log.Info("client with volume count", "volume_count", volumeCount, "aggregates", len(result.Payload.AggregateResponseInlineRecords), "nil_volume_counts", nilCount)
 
 		if volumeCount < minVolumes {
 			minVolumes = volumeCount
