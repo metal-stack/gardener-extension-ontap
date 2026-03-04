@@ -11,7 +11,7 @@ require (
 	github.com/golang/mock v1.6.0
 	github.com/google/go-cmp v0.7.0
 	github.com/metal-stack/metal-lib v0.23.5
-	github.com/metal-stack/ontap-go v0.1.1-0.20260303135257-6a4195ce92ab
+	github.com/metal-stack/ontap-go v0.2.0
 	github.com/onsi/ginkgo v1.16.5
 	github.com/sethvargo/go-password v0.3.1
 	github.com/spf13/cobra v1.10.2
