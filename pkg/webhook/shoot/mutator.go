@@ -78,18 +78,20 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
 		x.Spec.Template.Spec.DNSPolicy = corev1.DNSDefault
+		propagation := corev1.MountPropagationHostToContainer
+		privileged := true
 		x.Spec.Template.Spec.InitContainers = append(x.Spec.Template.Spec.InitContainers, corev1.Container{
 			Name:  "init-nvme-tcp",
 			Image: "busybox:1.36",
 			SecurityContext: &corev1.SecurityContext{
-				Privileged: boolPtr(true),
+				Privileged: &privileged,
 			},
 			Command: []string{"/bin/sh", "-c", "[ -e /sys/module/nvme-tcp ] && modinfo nvme-tcp || { modinfo nvme-tcp && modprobe nvme-tcp ; } || { echo \"FAILED to load nvme-tcp kernel driver\" && exit 1 ; }"},
 			VolumeMounts: []corev1.VolumeMount{
 				{
 					Name:             "modules-dir",
 					MountPath:        "/lib/modules",
-					MountPropagation: mountPropPtr(corev1.MountPropagationHostToContainer),
+					MountPropagation: &propagation,
 				},
 			},
 		})
@@ -121,13 +123,4 @@ func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string
 	}
 
 	return nil
-}
-
-// Helper functions for pointer conversion
-func boolPtr(b bool) *bool {
-	return &b
-}
-
-func mountPropPtr(prop corev1.MountPropagationMode) *corev1.MountPropagationMode {
-	return &prop
 }
