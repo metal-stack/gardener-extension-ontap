@@ -76,7 +76,7 @@ func NewSvmManager(log logr.Logger, clients []*ontapv1.Ontap, seedClient client.
 func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error) {
 	var (
 		bestClient      *ontapv1.Ontap
-		bestClientIndex int   = -1
+		bestClientIndex       = -1
 		minVolumes      int64 = math.MaxInt64
 	)
 
