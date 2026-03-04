@@ -8,6 +8,7 @@ import (
 
 	"github.com/sethvargo/go-password/password"
 
+	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -88,7 +89,7 @@ func getClusterUsername(shootNamespace string) (string, error) {
 	return shootName, nil
 }
 
-func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, opts userAndSecretOptions) error {
+func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, ontapClient *ontapv1.Ontap, opts userAndSecretOptions) error {
 	m.log.Info("Validating complete user state", "svm", opts.projectID, "shootNamespace", opts.shootNamespace)
 
 	clusterUsername, err := getClusterUsername(opts.shootNamespace)
@@ -104,7 +105,7 @@ func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, opt
 	existingPassword, secretErr := m.checkIfAccountExistsForSvm(ctx, secretName, opts.svmSeedSecretNamespace)
 
 	// 2. Check if ontap user exists already
-	ontapUserExists, _, userErr := m.validateONTAPUserExists(ctx, clusterUsername, opts)
+	ontapUserExists, _, userErr := m.validateONTAPUserExists(ctx, ontapClient, clusterUsername, opts)
 
 	// 3. Determine what needs to be created/updated
 	switch {
@@ -114,12 +115,12 @@ func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, opt
 	// Secret exists but ONTAP user missing - create ONTAP user with existing password
 	case errors.Is(secretErr, ErrAlreadyExists) && !ontapUserExists:
 		m.log.Info("K8s secret exists but ONTAP user missing, creating ONTAP user", "svm", opts.projectID, "user", clusterUsername)
-		return m.createONTAPUserWithPassword(ctx, clusterUsername, opts, existingPassword)
+		return m.createONTAPUserWithPassword(ctx, ontapClient, clusterUsername, opts, existingPassword)
 
 	case errors.Is(secretErr, ErrSeedSecretMissing) && ontapUserExists:
 		// ONTAP user exists but secret missing - create secret with new password
 		m.log.Info("ONTAP user exists but K8s secret missing, updating password and creating secret", "svm", opts.projectID, "user", clusterUsername)
-		newPassword, err := m.resetONTAPUserPassword(ctx, clusterUsername, opts)
+		newPassword, err := m.resetONTAPUserPassword(ctx, ontapClient, clusterUsername, opts)
 		if err != nil {
 			return err
 		}
@@ -127,7 +128,7 @@ func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, opt
 
 	case errors.Is(secretErr, ErrSeedSecretMissing) && !ontapUserExists:
 		// Neither exists - create both
-		return m.createCompleteUserAndSecret(ctx, clusterUsername, secretName, opts)
+		return m.createCompleteUserAndSecret(ctx, ontapClient, clusterUsername, secretName, opts)
 
 	default:
 		// Handle other errors
@@ -142,12 +143,12 @@ func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, opt
 }
 
 // validateONTAPUserExists checks if ONTAP user exists by querying accounts
-func (m *SvmManager) validateONTAPUserExists(ctx context.Context, username string, opts userAndSecretOptions) (bool, string, error) {
+func (m *SvmManager) validateONTAPUserExists(ctx context.Context, ontapClient *ontapv1.Ontap, username string, opts userAndSecretOptions) (bool, string, error) {
 	params := security.NewAccountCollectionGetParamsWithContext(ctx)
 	params.SetOwnerUUID(&opts.svmUUID)
 	params.SetName(&username)
 
-	result, err := m.ontapClient.Security.AccountCollectionGet(params, nil)
+	result, err := ontapClient.Security.AccountCollectionGet(params, nil)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to query ONTAP users: %w", err)
 	}
@@ -160,7 +161,7 @@ func (m *SvmManager) validateONTAPUserExists(ctx context.Context, username strin
 }
 
 // attemptUserCreation tries to create a user with given password
-func (m *SvmManager) attemptUserCreation(ctx context.Context, opts ontapUserOptions, password string) (string, error) {
+func (m *SvmManager) attemptUserCreation(ctx context.Context, ontapClient *ontapv1.Ontap, opts ontapUserOptions, password string) (string, error) {
 	var (
 		application = "http"
 		authMethod  = "password"
@@ -189,12 +190,12 @@ func (m *SvmManager) attemptUserCreation(ctx context.Context, opts ontapUserOpti
 		},
 	})
 
-	_, err := m.ontapClient.Security.AccountCreate(createAccountParams, nil)
+	_, err := ontapClient.Security.AccountCreate(createAccountParams, nil)
 	return password, err
 }
 
 // createONTAPUserWithPassword creates ONTAP user with specific password
-func (m *SvmManager) createONTAPUserWithPassword(ctx context.Context, username string, opts userAndSecretOptions, password string) error {
+func (m *SvmManager) createONTAPUserWithPassword(ctx context.Context, ontapClient *ontapv1.Ontap, username string, opts userAndSecretOptions, password string) error {
 	ontapOpts := ontapUserOptions{
 		username:         username,
 		svmName:          opts.projectID,
@@ -202,7 +203,7 @@ func (m *SvmManager) createONTAPUserWithPassword(ctx context.Context, username s
 		svmUUID:          opts.svmUUID,
 	}
 
-	_, err := m.attemptUserCreation(ctx, ontapOpts, password)
+	_, err := m.attemptUserCreation(ctx, ontapClient, ontapOpts, password)
 	if err != nil {
 		return fmt.Errorf("failed to create ONTAP user with existing password: %w", err)
 	}
@@ -212,13 +213,13 @@ func (m *SvmManager) createONTAPUserWithPassword(ctx context.Context, username s
 }
 
 // resetONTAPUserPassword updates existing user password
-func (m *SvmManager) resetONTAPUserPassword(ctx context.Context, username string, opts userAndSecretOptions) (string, error) {
+func (m *SvmManager) resetONTAPUserPassword(ctx context.Context, ontapClient *ontapv1.Ontap, username string, opts userAndSecretOptions) (string, error) {
 	password, err := generateSecurePassword()
 	if err != nil {
 		return "", err
 	}
 
-	_, err = m.updateExistingUserPassword(ctx, username, opts.projectID, password)
+	_, err = m.updateExistingUserPassword(ctx, ontapClient, username, opts.projectID, password)
 	if err != nil {
 		return "", fmt.Errorf("failed to reset ONTAP user password: %w", err)
 	}
@@ -227,7 +228,7 @@ func (m *SvmManager) resetONTAPUserPassword(ctx context.Context, username string
 }
 
 // createCompleteUserAndSecret creates both ONTAP user and K8s secret
-func (m *SvmManager) createCompleteUserAndSecret(ctx context.Context, username string, secretName string, opts userAndSecretOptions) error {
+func (m *SvmManager) createCompleteUserAndSecret(ctx context.Context, ontapClient *ontapv1.Ontap, username string, secretName string, opts userAndSecretOptions) error {
 	password, err := generateSecurePassword()
 	if err != nil {
 		return err
@@ -241,7 +242,7 @@ func (m *SvmManager) createCompleteUserAndSecret(ctx context.Context, username s
 		svmUUID:          opts.svmUUID,
 	}
 
-	_, err = m.attemptUserCreation(ctx, ontapOpts, password)
+	_, err = m.attemptUserCreation(ctx, ontapClient, ontapOpts, password)
 	if err != nil {
 		return fmt.Errorf("failed to create ONTAP user: %w", err)
 	}
@@ -293,15 +294,15 @@ func (m *SvmManager) updateSecretInSeed(ctx context.Context, secretName, namespa
 }
 
 // CreateUserAndSecret creates an svm scoped account set to vsadmin role.
-func (m *SvmManager) CreateUserAndSecret(ctx context.Context, opts userAndSecretOptions) error {
+func (m *SvmManager) CreateUserAndSecret(ctx context.Context, ontapClient *ontapv1.Ontap, opts userAndSecretOptions) error {
 	m.log.Info("Ensuring complete user and secret state", "svm", opts.projectID)
 
 	// Use comprehensive validation instead of simple creation
-	return m.validateAndEnsureCompleteUserState(ctx, opts)
+	return m.validateAndEnsureCompleteUserState(ctx, ontapClient, opts)
 }
 
 // updateExistingUserPassword updates the password for an existing ONTAP user
-func (m *SvmManager) updateExistingUserPassword(ctx context.Context, username, svmName, password string) (string, error) {
+func (m *SvmManager) updateExistingUserPassword(ctx context.Context, ontapClient *ontapv1.Ontap, username, svmName, password string) (string, error) {
 	secparams := security.NewAccountPasswordCreateParamsWithContext(ctx)
 	secparams.Info = &models.AccountPassword{
 		Name:     new(username),
@@ -311,7 +312,7 @@ func (m *SvmManager) updateExistingUserPassword(ctx context.Context, username, s
 		},
 	}
 
-	_, pwdErr := m.ontapClient.Security.AccountPasswordCreate(secparams, nil)
+	_, pwdErr := ontapClient.Security.AccountPasswordCreate(secparams, nil)
 	if pwdErr == nil {
 		m.log.Info("Password updated successfully", "username", username, "svm", svmName)
 		return password, nil

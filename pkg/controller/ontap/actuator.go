@@ -36,7 +36,7 @@ import (
 // FIXME here the logic to deploy the trident operator
 
 type actuator struct {
-	ontap              *ontapv1.Ontap
+	clients            []*ontapv1.Ontap
 	client             client.Client
 	decoder            runtime.Decoder
 	config             config.ControllerConfiguration
@@ -47,13 +47,13 @@ const ShootWebhooksResourceName = "extension-ontap-shoot"
 
 // NewActuator returns an actuator responsible for Extension resources.
 func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration, shootWebhookConfig *atomic.Value) (extension.Actuator, error) {
-	ontapClient, err := createAdminClient(ctx, config)
+	clients, err := createAdminClient(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	return &actuator{
-		ontap:              ontapClient,
+		clients:            clients,
 		client:             mgr.GetClient(),
 		decoder:            serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
 		config:             config,
@@ -61,7 +61,7 @@ func NewActuator(ctx context.Context, mgr manager.Manager, config config.Control
 	}, nil
 }
 
-func createAdminClient(ctx context.Context, config config.ControllerConfiguration) (*ontapv1.Ontap, error) {
+func createAdminClient(ctx context.Context, config config.ControllerConfiguration) ([]*ontapv1.Ontap, error) {
 	err := config.Validate()
 	if err != nil {
 		return nil, err
@@ -90,8 +90,16 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 		return nil, err
 	}
 
-	// Get statistics of cluster, can be updated in the future to check the state or capacity to choose cluster for the client
-	for _, client := range *metroClusterClient {
+	if metroClusterClient == nil || len(*metroClusterClient) == 0 {
+		return nil, fmt.Errorf("couldn't initialize any ONTAP clients")
+	}
+
+	mcClients := *metroClusterClient
+	var clients []*ontapv1.Ontap
+
+	for i := range mcClients {
+		client := &mcClients[i]
+
 		cgparams := cluster.NewClusterGetParamsWithContext(ctx)
 		cgok, err := client.Cluster.ClusterGet(cgparams, nil)
 		if err != nil {
@@ -101,14 +109,14 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 
 		log.Info("Successfully connected to ONTAP cluster", "cluster", *clusterResponse.Name, "statistics", *clusterResponse.Statistics)
 
-		// for now just return the first client
-		// TODO create logic to switch between clients
-		if *clusterResponse.Statistics.Status == "ok" {
-			return &client, nil
-		}
+		clients = append(clients, client)
 	}
 
-	return nil, fmt.Errorf("couldn't initialize admin client")
+	if len(clients) == 0 {
+		return nil, fmt.Errorf("couldn't initialize any ONTAP clients")
+	}
+
+	return clients, nil
 }
 
 // Reconcile handles extension creation and updates.
@@ -236,7 +244,7 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 
 // ensureSvmForProject ensures a complete SVM exists with all required components
 func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, shootNamespace string, svmSeedSecretNamespace string) error {
-	svnManager := trident.NewSvmManager(log, a.ontap, a.client)
+	svmManager := trident.NewSvmManager(log, a.clients, a.client)
 
 	svmOpts := trident.CreateSVMOptions{
 		ProjectID:              projectId,
@@ -245,7 +253,7 @@ func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, Svm
 		SvmSeedSecretNamespace: svmSeedSecretNamespace,
 	}
 
-	if err := svnManager.EnsureCompleteSVM(ctx, svmOpts); err != nil {
+	if err := svmManager.EnsureCompleteSVM(ctx, svmOpts); err != nil {
 		return fmt.Errorf("failed to ensure complete SVM for project %s shoot namespace %s: %w", projectId, shootNamespace, err)
 	}
 

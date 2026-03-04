@@ -337,8 +337,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/metal-stack/metal-lib v0.23.5 h1:ozrkB3DNr3Cqn8nkBvmzc/KKpYqC1j1mv2OVOj8i7Ac=
 github.com/metal-stack/metal-lib v0.23.5/go.mod h1:7uyHIrE19dkLwCZyeh2jmd7IEq5pEpzrzUGLoMN1eqY=
-github.com/metal-stack/ontap-go v0.1.0 h1:14Kh9ODbBNjLcaVncmMIe7NGV3IQFBirimoEJ/ykID4=
-github.com/metal-stack/ontap-go v0.1.0/go.mod h1:YqXkAd5RSMB1+tGWrFDgZYOxzQHF/zWdd90dx2AzLNQ=
+github.com/metal-stack/ontap-go v0.2.0 h1:PRuCHvV7cpQw27SnEnFn0myMHXvFmSzu+Zhpegp2UTg=
+github.com/metal-stack/ontap-go v0.2.0/go.mod h1:Y5ow8tf9HnIQfiQ7Ql+vZLdeemWK18c42McKxFpgkLs=
 github.com/mfridman/tparse v0.18.0 h1:wh6dzOKaIwkUGyKgOntDW4liXSo37qg5AXbIhkMV3vE=
 github.com/mfridman/tparse v0.18.0/go.mod h1:gEvqZTuCgEhPbYk/2lS3Kcxg1GmTxxU7kTC8DvP0i/A=
 github.com/mitchellh/copystructure v1.2.0 h1:vpKXTN4ewci03Vljg/q9QvCGUDttBOGBIa15WveJJGw=
