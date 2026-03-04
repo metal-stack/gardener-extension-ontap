@@ -75,11 +75,12 @@ func NewSvmManager(log logr.Logger, clients []*ontapv1.Ontap, seedClient client.
 // getWriteClient dynamically selects the client with the fewest total volumes.
 func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error) {
 	var (
-		bestClient *ontapv1.Ontap
-		minVolumes int64 = math.MaxInt64
+		bestClient      *ontapv1.Ontap
+		bestClientIndex int   = -1
+		minVolumes      int64 = math.MaxInt64
 	)
 
-	for _, c := range m.clients {
+	for i, c := range m.clients {
 		params := storage.NewAggregateCollectionGetParamsWithContext(ctx)
 		params.Fields = []string{"volume-count"}
 
@@ -93,15 +94,18 @@ func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error)
 		for _, aggr := range result.Payload.AggregateResponseInlineRecords {
 			if aggr.VolumeCount == nil {
 				nilCount++
+				m.log.Info("aggregate with nil volume_count", "client_index", i, "aggregate", aggr.Name, "uuid", aggr.UUID)
 				continue
 			}
+			m.log.Info("aggregate volume_count", "client_index", i, "aggregate", aggr.Name, "volume_count", *aggr.VolumeCount)
 			volumeCount += *aggr.VolumeCount
 		}
-		m.log.Info("client with volume count", "volume_count", volumeCount, "aggregates", len(result.Payload.AggregateResponseInlineRecords), "nil_volume_counts", nilCount)
+		m.log.Info("client total volume count", "client_index", i, "volume_count", volumeCount, "aggregates", len(result.Payload.AggregateResponseInlineRecords), "nil_volume_counts", nilCount)
 
 		if volumeCount < minVolumes {
 			minVolumes = volumeCount
 			bestClient = c
+			bestClientIndex = i
 		}
 	}
 
@@ -109,7 +113,7 @@ func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error)
 		return nil, fmt.Errorf("no suitable write client found")
 	}
 
-	m.log.Info("using client", "client", bestClient)
+	m.log.Info("selected write client", "client_index", bestClientIndex, "volume_count", minVolumes)
 	return bestClient, nil
 }
 
