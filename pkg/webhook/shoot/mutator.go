@@ -120,6 +120,17 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
 			return nil
 		}
+
+		if !slices.ContainsFunc(x.Spec.Template.Spec.Tolerations, func(t corev1.Toleration) bool {
+			return t.Key == "node.gardener.cloud/critical-components-not-ready"
+		}) {
+			x.Spec.Template.Spec.Tolerations = append(x.Spec.Template.Spec.Tolerations, corev1.Toleration{
+				Key:      "node.gardener.cloud/critical-components-not-ready",
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			})
+		}
+
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
 		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
 	}
