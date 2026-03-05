@@ -95,6 +95,14 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 				},
 			},
 		})
+		x.Spec.Template.Spec.Volumes = append(x.Spec.Template.Spec.Volumes, corev1.Volume{
+			Name: "modules-dir",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/lib/modules",
+				},
+			},
+		})
 		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
 	case *appsv1.Deployment:
 		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
