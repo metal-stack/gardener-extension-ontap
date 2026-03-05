@@ -115,6 +115,11 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 			})
 		}
 
+		if x.Spec.Template.Annotations == nil {
+			x.Spec.Template.Annotations = make(map[string]string)
+		}
+		x.Spec.Template.Annotations["node.gardener.cloud/wait-for-csi-node-trident"] = "csi.trident.netapp.io"
+
 		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
 	case *appsv1.Deployment:
 		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
