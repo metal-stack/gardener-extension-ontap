@@ -3,6 +3,7 @@ package shoot
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 
 	extensionswebhook "github.com/gardener/gardener/extensions/pkg/webhook"
@@ -78,6 +79,47 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
 		x.Spec.Template.Spec.DNSPolicy = corev1.DNSDefault
+
+		if !slices.ContainsFunc(x.Spec.Template.Spec.InitContainers, func(c corev1.Container) bool {
+			return c.Name == "init-nvme-tcp"
+		}) {
+			propagation := corev1.MountPropagationHostToContainer
+			privileged := true
+			x.Spec.Template.Spec.InitContainers = append(x.Spec.Template.Spec.InitContainers, corev1.Container{
+				Name:  "init-nvme-tcp",
+				Image: "busybox:1.36",
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: &privileged,
+				},
+				Command: []string{"/bin/sh", "-c", "[ -e /sys/module/nvme-tcp ] && modinfo nvme-tcp || { modinfo nvme-tcp && modprobe nvme-tcp ; } || { echo \"FAILED to load nvme-tcp kernel driver\" && exit 1 ; }"},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:             "modules-dir",
+						MountPath:        "/lib/modules",
+						MountPropagation: &propagation,
+					},
+				},
+			})
+		}
+
+		if !slices.ContainsFunc(x.Spec.Template.Spec.Volumes, func(v corev1.Volume) bool {
+			return v.Name == "modules-dir"
+		}) {
+			x.Spec.Template.Spec.Volumes = append(x.Spec.Template.Spec.Volumes, corev1.Volume{
+				Name: "modules-dir",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: "/lib/modules",
+					},
+				},
+			})
+		}
+
+		if x.Spec.Template.Annotations == nil {
+			x.Spec.Template.Annotations = make(map[string]string)
+		}
+		x.Spec.Template.Annotations["node.gardener.cloud/wait-for-csi-node-trident"] = "csi.trident.netapp.io"
+
 		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
 	case *appsv1.Deployment:
 		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
