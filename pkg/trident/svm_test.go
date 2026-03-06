@@ -13,36 +13,10 @@ import (
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
 	"github.com/metal-stack/ontap-go/api/client/storage"
 	"github.com/metal-stack/ontap-go/api/models"
-	mockcluster "github.com/metal-stack/ontap-go/test/mocks/cluster"
-	mocknetworking "github.com/metal-stack/ontap-go/test/mocks/networking"
-	mocksvm "github.com/metal-stack/ontap-go/test/mocks/s_vm"
-	mockstorage "github.com/metal-stack/ontap-go/test/mocks/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-type mockOntapClient struct {
-	client     *ontapv1.Ontap
-	svm        *mocksvm.ClientService
-	storage    *mockstorage.ClientService
-	cluster    *mockcluster.ClientService
-	networking *mocknetworking.ClientService
-}
-
-func newMockOntapClient() *mockOntapClient {
-	s := &mocksvm.ClientService{}
-	st := &mockstorage.ClientService{}
-	cl := &mockcluster.ClientService{}
-	n := &mocknetworking.ClientService{}
-	return &mockOntapClient{
-		client:     &ontapv1.Ontap{SVM: s, Storage: st, Cluster: cl, Networking: n},
-		svm:        s,
-		storage:    st,
-		cluster:    cl,
-		networking: n,
-	}
-}
 
 func TestGetWriteClient(t *testing.T) {
 	ctx := context.Background()
@@ -188,6 +162,199 @@ func TestGetSVMByName(t *testing.T) {
 		uuid, _, err := m.GetSVMByName(ctx, "proj-1")
 		require.NoError(t, err)
 		assert.Equal(t, "uuid-2", *uuid)
+	})
+}
+
+func TestGetSVMByName_MultiClientFailover(t *testing.T) {
+	ctx := context.Background()
+	runningSvmGet := &s_vm.SvmGetOK{Payload: &models.Svm{State: new("running")}}
+	stoppedSvmGet := &s_vm.SvmGetOK{Payload: &models.Svm{State: new("stopped")}}
+
+	t.Run("stopped on client1, found running on client2", func(t *testing.T) {
+		mc1, mc2 := newMockOntapClient(), newMockOntapClient()
+
+		// Client1 has SVM but stopped (e.g. metrocluster failover)
+		mc1.svm.On("SvmCollectionGet", mock.Anything, mock.Anything).
+			Return(&s_vm.SvmCollectionGetOK{Payload: &models.SvmResponse{
+				SvmResponseInlineRecords: []*models.Svm{
+					{Name: new("proj-1"), UUID: new("uuid-c1")},
+				},
+			}}, nil)
+		mc1.svm.On("SvmGet", mock.Anything, mock.Anything).Return(stoppedSvmGet, nil)
+
+		// Client2 has SVM running (took over)
+		mc2.svm.On("SvmCollectionGet", mock.Anything, mock.Anything).
+			Return(&s_vm.SvmCollectionGetOK{Payload: &models.SvmResponse{
+				SvmResponseInlineRecords: []*models.Svm{
+					{Name: new("proj-1"), UUID: new("uuid-c2")},
+				},
+			}}, nil)
+		mc2.svm.On("SvmGet", mock.Anything, mock.Anything).Return(runningSvmGet, nil)
+
+		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
+		uuid, c, err := m.GetSVMByName(ctx, "proj-1")
+		require.NoError(t, err)
+		assert.Equal(t, "uuid-c2", *uuid)
+		assert.Equal(t, mc2.client, c, "should select the client where SVM is running")
+	})
+
+	t.Run("client1 down, finds -mc name on client2", func(t *testing.T) {
+		mc1, mc2 := newMockOntapClient(), newMockOntapClient()
+
+		mc1.svm.On("SvmCollectionGet", mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("connection refused"))
+
+		// MetroCluster partner has SVM with -mc suffix
+		mc2.svm.On("SvmCollectionGet", mock.Anything, mock.Anything).
+			Return(&s_vm.SvmCollectionGetOK{Payload: &models.SvmResponse{
+				SvmResponseInlineRecords: []*models.Svm{
+					{Name: new("proj-1-mc"), UUID: new("uuid-mc")},
+				},
+			}}, nil)
+		mc2.svm.On("SvmGet", mock.Anything, mock.Anything).Return(runningSvmGet, nil)
+
+		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
+		uuid, c, err := m.GetSVMByName(ctx, "proj-1")
+		require.NoError(t, err)
+		assert.Equal(t, "uuid-mc", *uuid)
+		assert.Equal(t, mc2.client, c)
+	})
+
+	t.Run("prefers primary name over -mc on same client", func(t *testing.T) {
+		mc := newMockOntapClient()
+		mc.svm.On("SvmCollectionGet", mock.Anything, mock.Anything).
+			Return(&s_vm.SvmCollectionGetOK{Payload: &models.SvmResponse{
+				SvmResponseInlineRecords: []*models.Svm{
+					{Name: new("proj-1-mc"), UUID: new("uuid-mc")},
+					{Name: new("proj-1"), UUID: new("uuid-primary")},
+				},
+			}}, nil)
+		mc.svm.On("SvmGet", mock.Anything, mock.Anything).Return(runningSvmGet, nil)
+
+		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc.client}, nil)
+		uuid, _, err := m.GetSVMByName(ctx, "proj-1")
+		require.NoError(t, err)
+		assert.Equal(t, "uuid-primary", *uuid, "primary name should be preferred over -mc")
+	})
+}
+
+func TestIsRunningSVM(t *testing.T) {
+	ctx := context.Background()
+	m := NewSvmManager(logr.Discard(), nil, nil)
+
+	t.Run("nil uuid returns false", func(t *testing.T) {
+		mc := newMockOntapClient()
+		uuid, ok := m.isRunningSVM(ctx, mc.client, nil, "test")
+		assert.Nil(t, uuid)
+		assert.False(t, ok)
+	})
+
+	t.Run("api error returns false", func(t *testing.T) {
+		mc := newMockOntapClient()
+		mc.svm.On("SvmGet", mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("connection lost"))
+		id := "some-uuid"
+		_, ok := m.isRunningSVM(ctx, mc.client, &id, "test")
+		assert.False(t, ok)
+	})
+
+	t.Run("nil payload returns false", func(t *testing.T) {
+		mc := newMockOntapClient()
+		mc.svm.On("SvmGet", mock.Anything, mock.Anything).
+			Return(&s_vm.SvmGetOK{Payload: nil}, nil)
+		id := "some-uuid"
+		_, ok := m.isRunningSVM(ctx, mc.client, &id, "test")
+		assert.False(t, ok)
+	})
+}
+
+func TestGetWriteClient_FailoverBehavior(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("first client down fails entire selection", func(t *testing.T) {
+		// Documents current behavior: getWriteClient does NOT skip failing clients
+		mc1, mc2 := newMockOntapClient(), newMockOntapClient()
+		mc1.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("cluster unreachable"))
+		mc2.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
+			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
+				AggregateResponseInlineRecords: []*models.Aggregate{
+					{Name: new("a1"), UUID: new("u1"), VolumeCount: new(int64(5))},
+				},
+			}}, nil)
+
+		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
+		_, err := m.getWriteClient(ctx)
+		require.Error(t, err, "getWriteClient fails hard if any client is unreachable")
+		assert.Contains(t, err.Error(), "cluster unreachable")
+	})
+
+	t.Run("nil volume counts skipped, still selects correctly", func(t *testing.T) {
+		mc1, mc2 := newMockOntapClient(), newMockOntapClient()
+		// Client1: all aggregates have nil volume counts → treated as 0
+		mc1.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
+			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
+				AggregateResponseInlineRecords: []*models.Aggregate{
+					{Name: new("a1"), UUID: new("u1"), VolumeCount: nil},
+					{Name: new("a2"), UUID: new("u2"), VolumeCount: nil},
+				},
+			}}, nil)
+		// Client2: has real volume counts
+		mc2.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
+			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
+				AggregateResponseInlineRecords: []*models.Aggregate{
+					{Name: new("a3"), UUID: new("u3"), VolumeCount: new(int64(10))},
+				},
+			}}, nil)
+
+		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
+		got, err := m.getWriteClient(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, mc1.client, got, "nil volumes counted as 0 → client1 appears emptier")
+	})
+}
+
+func TestGetExistingNetworkInterfaces(t *testing.T) {
+	ctx := context.Background()
+	m := NewSvmManager(logr.Discard(), nil, nil)
+
+	t.Run("skips interfaces with nil name or ip", func(t *testing.T) {
+		mc := newMockOntapClient()
+		ip := models.IPAddress("10.0.0.1")
+		mc.networking.On("NetworkIPInterfacesGet", mock.Anything, mock.Anything).
+			Return(&networking.NetworkIPInterfacesGetOK{Payload: &models.IPInterfaceResponse{
+				IPInterfaceResponseInlineRecords: []*models.IPInterface{
+					{Name: nil, IP: &models.IPInfo{Address: &ip}},              // nil name
+					{Name: new("datalif+0"), IP: nil},                          // nil IP
+					{Name: new("datalif+1"), IP: &models.IPInfo{Address: &ip}}, // valid
+				},
+			}}, nil)
+
+		ifaces, err := m.getExistingNetworkInterfaces(ctx, mc.client, "uuid")
+		require.NoError(t, err)
+		assert.Len(t, ifaces, 1)
+		assert.Equal(t, "10.0.0.1", ifaces["datalif+1"])
+	})
+}
+
+func TestValidateAndEnsureDataLIFs_IPMismatch(t *testing.T) {
+	ctx := context.Background()
+	m := NewSvmManager(logr.Discard(), nil, nil)
+
+	t.Run("tolerates ip mismatch without creating new lif", func(t *testing.T) {
+		mc := newMockOntapClient()
+		existingIP := models.IPAddress("10.0.0.99")
+		mc.networking.On("NetworkIPInterfacesGet", mock.Anything, mock.Anything).
+			Return(&networking.NetworkIPInterfacesGetOK{Payload: &models.IPInterfaceResponse{
+				IPInterfaceResponseInlineRecords: []*models.IPInterface{
+					{Name: new("datalif+0"), IP: &models.IPInfo{Address: &existingIP}},
+				},
+			}}, nil)
+
+		// Expected IP differs from existing
+		err := m.validateAndEnsureDataLIFs(ctx, mc.client, "uuid", "svm", []string{"10.0.0.1"}, []string{"n1", "n2"})
+		require.NoError(t, err)
+		mc.networking.AssertNotCalled(t, "NetworkIPInterfacesCreate", mock.Anything, mock.Anything)
 	})
 }
 
