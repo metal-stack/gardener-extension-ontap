@@ -79,7 +79,7 @@ func TestGetAllNodesInCluster(t *testing.T) {
 		assert.Equal(t, []string{"node-1", "node-2"}, uuids)
 	})
 
-	t.Run("rejects single node", func(t *testing.T) {
+	t.Run("accepts single node", func(t *testing.T) {
 		mc := newMockOntapClient()
 		u1 := strfmt.UUID("node-1")
 		mc.cluster.On("NodesGet", mock.Anything, mock.Anything).
@@ -90,9 +90,9 @@ func TestGetAllNodesInCluster(t *testing.T) {
 			}}, nil)
 
 		m := NewSvmManager(logr.Discard(), nil, nil)
-		_, err := m.getAllNodesInCluster(ctx, mc.client)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "less than 2 nodes")
+		uuids, err := m.getAllNodesInCluster(ctx, mc.client)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"node-1"}, uuids)
 	})
 }
 
