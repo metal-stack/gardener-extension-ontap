@@ -327,6 +327,82 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, ontapClie
 	return nil
 }
 
+// validateAndEnsureAggregates ensures the SVM has all available cluster aggregates assigned.
+// When new aggregates are added to the cluster, this will update the SVM to include them.
+func (m *SvmManager) validateAndEnsureAggregates(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID, svmName string) error {
+	// Get all aggregates available on the cluster
+	aggrParams := storage.NewAggregateCollectionGetParamsWithContext(ctx)
+	aggrResult, err := ontapClient.Storage.AggregateCollectionGet(aggrParams, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get cluster aggregates: %w", err)
+	}
+
+	clusterAggregates := make(map[string]bool)
+	for _, aggr := range aggrResult.Payload.AggregateResponseInlineRecords {
+		if aggr.UUID != nil {
+			clusterAggregates[*aggr.UUID] = true
+		}
+	}
+
+	// Get the SVM's currently assigned aggregates
+	getParams := s_vm.NewSvmGetParamsWithContext(ctx)
+	getParams.SetUUID(svmUUID)
+	getParams.Fields = []string{"aggregates"}
+
+	svmInfo, err := ontapClient.SVM.SvmGet(getParams, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get SVM aggregates: %w", err)
+	}
+
+	svmAggregates := make(map[string]bool)
+	if svmInfo.Payload != nil {
+		for _, aggr := range svmInfo.Payload.SvmInlineAggregates {
+			if aggr.UUID != nil {
+				svmAggregates[*aggr.UUID] = true
+			}
+		}
+	}
+
+	// Check if there are new aggregates not yet assigned to the SVM
+	var missing bool
+	for uuid := range clusterAggregates {
+		if !svmAggregates[uuid] {
+			missing = true
+			m.log.Info("Found aggregate not assigned to SVM", "svmName", svmName, "aggregateUUID", uuid)
+			break
+		}
+	}
+
+	if !missing {
+		m.log.Info("All cluster aggregates already assigned to SVM", "svmName", svmName, "count", len(clusterAggregates))
+		return nil
+	}
+
+	// Build the full aggregate list and update the SVM
+	var aggrArrayItem []*models.SvmInlineAggregatesInlineArrayItem
+	for uuid := range clusterAggregates {
+		u := uuid
+		aggrArrayItem = append(aggrArrayItem, &models.SvmInlineAggregatesInlineArrayItem{
+			UUID: &u,
+		})
+	}
+
+	m.log.Info("Updating SVM with all cluster aggregates", "svmName", svmName, "aggregateCount", len(aggrArrayItem))
+
+	modifyParams := s_vm.NewSvmModifyParamsWithContext(ctx)
+	modifyParams.SetUUID(svmUUID)
+	modifyParams.SetInfo(&models.Svm{
+		SvmInlineAggregates: aggrArrayItem,
+	})
+
+	if _, _, err := ontapClient.SVM.SvmModify(modifyParams, nil); err != nil {
+		return fmt.Errorf("failed to update SVM %s aggregates: %w", svmName, err)
+	}
+
+	m.log.Info("Successfully updated SVM aggregates", "svmName", svmName)
+	return nil
+}
+
 // validateAndEnsureCompleteSVMState validates all components of an SVM and creates missing parts
 func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, activeClient *ontapv1.Ontap, svmUUID, svmName string, opts CreateSVMOptions) error {
 	m.log.Info("Validating complete SVM state", "svmName", svmName, "uuid", svmUUID)
@@ -336,18 +412,23 @@ func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, acti
 		return err
 	}
 
-	// 2. Get cluster nodes for LIF creation (if needed)
+	// 2. Ensure all cluster aggregates are assigned to the SVM
+	if err := m.validateAndEnsureAggregates(ctx, activeClient, svmUUID, svmName); err != nil {
+		return err
+	}
+
+	// 3. Get cluster nodes for LIF creation (if needed)
 	nodesUUIDs, err := m.getAllNodesInCluster(ctx, activeClient)
 	if err != nil {
 		return fmt.Errorf("failed to get cluster nodes for SVM validation: %w", err)
 	}
 
-	// 3. Validate and ensure data LIFs exist
+	// 4. Validate and ensure data LIFs exist
 	if err := m.validateAndEnsureDataLIFs(ctx, activeClient, svmUUID, svmName, opts.SvmIpaddresses.DataLifs, nodesUUIDs); err != nil {
 		return err
 	}
 
-	// 4. Validate and ensure management LIF exists
+	// 5. Validate and ensure management LIF exists
 	if err := m.validateAndEnsureManagementLIF(ctx, activeClient, svmUUID, svmName, opts.SvmIpaddresses.ManagementLif, nodesUUIDs[0]); err != nil {
 		return err
 	}
