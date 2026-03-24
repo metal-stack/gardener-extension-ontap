@@ -39,7 +39,7 @@ func NewMutator(mgr manager.Manager) extensionswebhook.Mutator {
 }
 
 func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
-	acc, err := meta.Accessor(new)
+	_, err := meta.Accessor(new)
 	if err != nil {
 		return fmt.Errorf("could not create accessor during webhook %w", err)
 	}
@@ -60,11 +60,6 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		"tridentvolumepublications.trident.netapp.io":     true,
 		"tridentvolumereferences.trident.netapp.io":       true,
 		"tridentvolumes.trident.netapp.io":                true,
-	}
-
-	// If the object does have a deletion timestamp then we don't want to mutate anything.
-	if acc.GetDeletionTimestamp() != nil {
-		return nil
 	}
 
 	switch x := new.(type) {
