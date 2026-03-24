@@ -532,3 +532,124 @@ func TestValidateAndEnsureManagementLIF(t *testing.T) {
 		mc.networking.AssertCalled(t, "NetworkIPInterfacesCreate", mock.Anything, mock.Anything)
 	})
 }
+
+func TestValidateAndEnsureAggregates(t *testing.T) {
+	ctx := context.Background()
+	m := NewSvmManager(logr.Discard(), nil, nil)
+
+	t.Run("no-op when all aggregates already assigned", func(t *testing.T) {
+		mc := newMockOntapClient()
+
+		// Cluster has 2 aggregates
+		mc.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
+			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
+				AggregateResponseInlineRecords: []*models.Aggregate{
+					{Name: new("aggr1"), UUID: new("uuid-1")},
+					{Name: new("aggr2"), UUID: new("uuid-2")},
+				},
+			}}, nil)
+
+		// SVM already has both aggregates
+		mc.svm.On("SvmGet", mock.Anything, mock.Anything).Return(&s_vm.SvmGetOK{
+			Payload: &models.Svm{
+				SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
+					{UUID: new("uuid-1")},
+					{UUID: new("uuid-2")},
+				},
+			},
+		}, nil)
+
+		err := m.validateAndEnsureAggregates(ctx, mc.client, "svm-uuid", "svm-name")
+		require.NoError(t, err)
+		mc.svm.AssertNotCalled(t, "SvmModify", mock.Anything, mock.Anything)
+	})
+
+	t.Run("updates SVM when new aggregate is available", func(t *testing.T) {
+		mc := newMockOntapClient()
+
+		// Cluster has 3 aggregates (one new)
+		mc.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
+			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
+				AggregateResponseInlineRecords: []*models.Aggregate{
+					{Name: new("aggr1"), UUID: new("uuid-1")},
+					{Name: new("aggr2"), UUID: new("uuid-2")},
+					{Name: new("aggr3"), UUID: new("uuid-3")},
+				},
+			}}, nil)
+
+		// SVM only has 2 aggregates
+		mc.svm.On("SvmGet", mock.Anything, mock.Anything).Return(&s_vm.SvmGetOK{
+			Payload: &models.Svm{
+				SvmInlineAggregates: []*models.SvmInlineAggregatesInlineArrayItem{
+					{UUID: new("uuid-1")},
+					{UUID: new("uuid-2")},
+				},
+			},
+		}, nil)
+
+		mc.svm.On("SvmModify", mock.Anything, mock.Anything).
+			Return(&s_vm.SvmModifyOK{}, nil, nil)
+
+		err := m.validateAndEnsureAggregates(ctx, mc.client, "svm-uuid", "svm-name")
+		require.NoError(t, err)
+		mc.svm.AssertCalled(t, "SvmModify", mock.Anything, mock.Anything)
+
+		// Verify the modify call contains all 3 aggregates
+		call := mc.svm.Calls[len(mc.svm.Calls)-1]
+		modifyParams := call.Arguments[0].(*s_vm.SvmModifyParams)
+		assert.Len(t, modifyParams.Info.SvmInlineAggregates, 3)
+	})
+
+	t.Run("updates SVM when it has no aggregates assigned", func(t *testing.T) {
+		mc := newMockOntapClient()
+
+		mc.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
+			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
+				AggregateResponseInlineRecords: []*models.Aggregate{
+					{Name: new("aggr1"), UUID: new("uuid-1")},
+				},
+			}}, nil)
+
+		// SVM has no aggregates
+		mc.svm.On("SvmGet", mock.Anything, mock.Anything).Return(&s_vm.SvmGetOK{
+			Payload: &models.Svm{
+				SvmInlineAggregates: nil,
+			},
+		}, nil)
+
+		mc.svm.On("SvmModify", mock.Anything, mock.Anything).
+			Return(&s_vm.SvmModifyOK{}, nil, nil)
+
+		err := m.validateAndEnsureAggregates(ctx, mc.client, "svm-uuid", "svm-name")
+		require.NoError(t, err)
+		mc.svm.AssertCalled(t, "SvmModify", mock.Anything, mock.Anything)
+	})
+
+	t.Run("error on aggregate collection get failure", func(t *testing.T) {
+		mc := newMockOntapClient()
+		mc.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("storage unavailable"))
+
+		err := m.validateAndEnsureAggregates(ctx, mc.client, "svm-uuid", "svm-name")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "storage unavailable")
+	})
+
+	t.Run("error on svm get failure", func(t *testing.T) {
+		mc := newMockOntapClient()
+
+		mc.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
+			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
+				AggregateResponseInlineRecords: []*models.Aggregate{
+					{Name: new("aggr1"), UUID: new("uuid-1")},
+				},
+			}}, nil)
+
+		mc.svm.On("SvmGet", mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("svm unreachable"))
+
+		err := m.validateAndEnsureAggregates(ctx, mc.client, "svm-uuid", "svm-name")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "svm unreachable")
+	})
+}
