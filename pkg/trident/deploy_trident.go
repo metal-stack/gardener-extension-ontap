@@ -28,6 +28,8 @@ const (
 	svmShootSecretFilename = "svm-shoot-secret.yaml"
 	cwnpFileName           = "cwnp.yaml"
 
+	snapshotCRDsName       string = "snapshot-crds"
+	snapshotControllerMR   string = "snapshot-controller"
 	tridentCRDsName        string = "trident-crds"
 	tridentInitMR          string = "trident-init"
 	tridentBackendsMR      string = "trident-backends"
@@ -41,6 +43,8 @@ const (
 var (
 	chartPath       = defaultChartPath
 	resourcesPath   = filepath.Join(chartPath, "resources")
+	snapshotCRDPath = filepath.Join(resourcesPath, "snapshot-crds")
+	snapshotCtlPath = filepath.Join(resourcesPath, "snapshot-controller")
 	tridentInitPath = filepath.Join(resourcesPath, "trident-init")
 	crdPath         = filepath.Join(resourcesPath, "crds")
 	backendPath     = filepath.Join(resourcesPath, "backends")
@@ -48,7 +52,9 @@ var (
 	cwnpPath        = filepath.Join(resourcesPath, "cwnps")
 
 	tridentResources = []tridentResource{
+		{name: snapshotCRDsName, path: snapshotCRDPath, waitForHealthy: true, keepObjects: true},
 		{name: tridentCRDsName, path: crdPath, waitForHealthy: true, keepObjects: true},
+		{name: snapshotControllerMR, path: snapshotCtlPath, waitForHealthy: false, keepObjects: true},
 		{name: tridentBackendsMR, path: backendPath, waitForHealthy: false, keepObjects: true},
 		{name: tridentSvmSecret, path: svmSecretsPath, waitForHealthy: false, keepObjects: false},
 		{name: tridentCwnp, path: cwnpPath, waitForHealthy: false, keepObjects: false},
