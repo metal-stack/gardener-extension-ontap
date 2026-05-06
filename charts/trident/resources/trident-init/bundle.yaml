@@ -127,6 +127,7 @@ rules:
       - watch
       - update
       - patch
+      - delete
   - apiGroups:
       - storage.k8s.io
     resources:
@@ -261,12 +262,20 @@ rules:
       - tridentgroupsnapshots/status
       - tridentactionsnapshotrestores
       - tridentactionsnapshotrestores/status
+      - tridentnoderemediations
+      - tridentnoderemediations/status
+      - tridentnoderemediationtemplates
+      - tridentnoderemediationtemplates/status
       - tridentprovisioners # Required for Tprov
       - tridentprovisioners/status # Required to update Tprov's status section
       - tridentorchestrators # Required for Torc
       - tridentorchestrators/status # Required to update Torc's status section
       - tridentconfigurators # Required for tconf
       - tridentconfigurators/status # Required to update tconf's status section
+      - tridentautogrowpolicies
+      - tridentautogrowpolicies/status
+      - tridentautogrowrequestinternals
+      - tridentautogrowrequestinternals/status
     verbs:
       - get
       - list
@@ -385,10 +394,12 @@ rules:
       - clusterroles
       - clusterrolebindings
     verbs:
+      - get
       - delete
       - update
       - patch
     resourceNames:
+      - trident-node-remediation-access
       - trident-controller
       - trident-node-linux
       - trident-node-windows
@@ -495,7 +506,7 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: trident-operator
-          image: docker.io/netapp/trident-operator:25.06.3
+          image: docker.io/netapp/trident-operator:26.02.1
           imagePullPolicy: IfNotPresent
           name: trident-operator
           resources:
