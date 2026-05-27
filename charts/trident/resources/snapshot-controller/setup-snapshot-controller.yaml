@@ -33,6 +33,7 @@ spec:
       labels:
         app.kubernetes.io/name: snapshot-controller
         networking.gardener.cloud/to-apiserver: allowed
+        networking.gardener.cloud/to-dns: allowed
     spec:
       serviceAccountName: snapshot-controller
       containers:
