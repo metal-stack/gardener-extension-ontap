@@ -35,7 +35,7 @@ spec:
         networking.gardener.cloud/to-apiserver: allowed
         networking.gardener.cloud/to-dns: allowed
     spec:
-      serviceAccountName: snapshot-controller
+      serviceAccountName: snapshot-controller-ontap
       containers:
         - name: snapshot-controller
           image: registry.k8s.io/sig-storage/snapshot-controller:v8.2.0

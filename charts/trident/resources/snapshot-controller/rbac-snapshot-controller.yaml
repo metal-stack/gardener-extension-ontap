@@ -9,7 +9,7 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: snapshot-controller
+  name: snapshot-controller-ontap
   namespace: kube-system
   labels:
     shoot.gardener.cloud/no-cleanup: "true"
@@ -18,7 +18,7 @@ metadata:
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: snapshot-controller-runner
+  name: snapshot-controller-runner-ontap
   labels:
     shoot.gardener.cloud/no-cleanup: "true"
 rules:
@@ -71,23 +71,23 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: snapshot-controller-role
+  name: snapshot-controller-ontap
   labels:
     shoot.gardener.cloud/no-cleanup: "true"
 subjects:
   - kind: ServiceAccount
-    name: snapshot-controller
+    name: snapshot-controller-ontap
     namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: snapshot-controller-runner
+  name: snapshot-controller-runner-ontap
   apiGroup: rbac.authorization.k8s.io
 
 ---
 kind: Role
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: snapshot-controller-leaderelection
+  name: snapshot-controller-leaderelection-ontap
   namespace: kube-system
   labels:
     shoot.gardener.cloud/no-cleanup: "true"
@@ -100,14 +100,14 @@ rules:
 kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: snapshot-controller-leaderelection
+  name: snapshot-controller-leaderelection-ontap
   namespace: kube-system
   labels:
     shoot.gardener.cloud/no-cleanup: "true"
 subjects:
   - kind: ServiceAccount
-    name: snapshot-controller
+    name: snapshot-controller-ontap
 roleRef:
   kind: Role
-  name: snapshot-controller-leaderelection
+  name: snapshot-controller-leaderelection-ontap
   apiGroup: rbac.authorization.k8s.io
