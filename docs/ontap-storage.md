@@ -10,13 +10,13 @@ ONTAP is the platform's persistent, network-attached block storage system. Kuber
 
 This is the essential difference from local LVM storage:
 
-| Property | ONTAP | Local LVM |
-|----------|-------|-----------|
-| Storage location | External storage system | Local worker disk |
-| Access | NVMe/TCP over the network | Directly on the node |
-| Node loss | Data remains in the storage system | Local data can be lost with the node |
-| Site protection | Synchronous MetroCluster replication | No cross-site protection |
-| Kubernetes integration | NetApp Trident CSI | CSI Driver LVM |
+| Property               | ONTAP                                | Local LVM                            |
+|------------------------|--------------------------------------|--------------------------------------|
+| Storage location       | External storage system              | Local worker disk                    |
+| Access                 | NVMe/TCP over the network            | Directly on the node                 |
+| Node loss              | Data remains in the storage system   | Local data can be lost with the node |
+| Site protection        | Synchronous MetroCluster replication | No cross-site protection             |
+| Kubernetes integration | NetApp Trident CSI                   | CSI Driver LVM                       |
 
 This page explains ONTAP and the end-to-end data path. The automation is documented separately in [`gardener-extension-ontap.md`](gardener-extension-ontap.md).
 
@@ -26,18 +26,18 @@ This page explains ONTAP and the end-to-end data path. The automation is documen
 
 ONTAP separates physical capacity, tenants, network endpoints, and the volumes used by Kubernetes. The following objects are important for understanding the platform:
 
-| Term | Meaning |
-|------|---------|
-| **Node / controller** | Physical ONTAP instance that provides disks, network ports, and storage services |
-| **HA pair** | Two controllers at one site that can take over for each other if a node fails |
-| **ONTAP cluster** | Administrative grouping of the local HA pair |
-| **MetroCluster** | Cross-site grouping of two ONTAP clusters with synchronous replication |
-| **Aggregate** | ONTAP capacity pool built from the physical disks of a node |
-| **SVM** | Storage Virtual Machine; the logical and administrative tenant boundary for a Metal project |
-| **Volume** | Logical storage area within an SVM that draws capacity from its assigned aggregates |
-| **LIF** | Logical Interface; an IP-based SVM interface for management or data access |
-| **NVMe subsystem / namespace** | ONTAP objects through which a block device is made available to an NVMe host |
-| **Trident backend** | Connection between Trident in the shoot and the project-specific SVM |
+| Term                           | Meaning                                                                                     |
+|--------------------------------|---------------------------------------------------------------------------------------------|
+| **Node / controller**          | Physical ONTAP instance that provides disks, network ports, and storage services            |
+| **HA pair**                    | Two controllers at one site that can take over for each other if a node fails               |
+| **ONTAP cluster**              | Administrative grouping of the local HA pair                                                |
+| **MetroCluster**               | Cross-site grouping of two ONTAP clusters with synchronous replication                      |
+| **Aggregate**                  | ONTAP capacity pool built from the physical disks of a node                                 |
+| **SVM**                        | Storage Virtual Machine; the logical and administrative tenant boundary for a Metal project |
+| **Volume**                     | Logical storage area within an SVM that draws capacity from its assigned aggregates         |
+| **LIF**                        | Logical Interface; an IP-based SVM interface for management or data access                  |
+| **NVMe subsystem / namespace** | ONTAP objects through which a block device is made available to an NVMe host                |
+| **Trident backend**            | Connection between Trident in the shoot and the project-specific SVM                        |
 
 The simplified hierarchy is:
 
@@ -68,11 +68,11 @@ An SVM is not separate hardware and does not own exclusive disks. It is a logica
 
 A MetroCluster consists of two ONTAP clusters at separate sites:
 
-| Location | Topology | Role |
-|----------|----------|------|
-| Site A | Two ONTAP controllers as a local HA pair | One MetroCluster site |
-| Site B | Two ONTAP controllers as a local HA pair | Second MetroCluster site |
-| Third failure domain | Optional ONTAP Mediator | Quorum and switchover support |
+| Location             | Topology                                 | Role                          |
+|----------------------|------------------------------------------|-------------------------------|
+| Site A               | Two ONTAP controllers as a local HA pair | One MetroCluster site         |
+| Site B               | Two ONTAP controllers as a local HA pair | Second MetroCluster site      |
+| Third failure domain | Optional ONTAP Mediator                  | Quorum and switchover support |
 
 The controllers at a site are connected through a local cluster interconnect. The two sites communicate through redundant inter-site links. These links carry synchronous replication and cross-site MetroCluster metadata. Bandwidth, switch models, and specific network segments depend on the deployment.
 
@@ -91,11 +91,11 @@ This separation is important: Kubernetes data traffic does not use the global cl
 
 A MetroCluster spans two sites. At each site, two controllers form a local HA pair. MetroCluster replicates data synchronously between the sites.
 
-| Layer | Responsibility |
-|-------|----------------|
-| **Local HA pair** | Handles the failure of a single controller. |
+| Layer                          | Responsibility                                               |
+|--------------------------------|--------------------------------------------------------------|
+| **Local HA pair**              | Handles the failure of a single controller.                  |
 | **MetroCluster between sites** | Maintains a synchronous copy of the data at the second site. |
-| **ONTAP Mediator** | Supports the switchover decision if an entire site fails. |
+| **ONTAP Mediator**             | Supports the switchover decision if an entire site fails.    |
 
 A project-specific Storage Virtual Machine (SVM) is active at one site. The corresponding MetroCluster sync destination with the `-mc` suffix exists at the other site. Applications do not write to both sides simultaneously: they access the active SVM while ONTAP performs synchronous replication to the other side.
 
@@ -129,13 +129,13 @@ Three separate layers must work together during failover:
 
 MetroCluster protects the data and makes it available at the second site. Kubernetes, Trident, and the network then restore workload access.
 
-| Failure | Primary response | What matters next |
-|---------|------------------|-------------------|
-| Single ONTAP controller | Local partner takes over | LIF and NVMe/TCP connections must remain reachable |
-| Entire storage site | MetroCluster switchover | BGP routing, LIF reachability, and Trident reconnect |
-| Kubernetes worker | Workload starts on another worker | The new worker establishes an NVMe/TCP connection to the volume |
-| Management path disruption | Existing I/O can continue independently | New volumes, expansion, and snapshot operations can fail |
-| Data path disruption | Worker cannot reach the block device | Inspect the data LIF, TCP 4420, and NVMe session |
+| Failure                    | Primary response                        | What matters next                                               |
+|----------------------------|-----------------------------------------|-----------------------------------------------------------------|
+| Single ONTAP controller    | Local partner takes over                | LIF and NVMe/TCP connections must remain reachable              |
+| Entire storage site        | MetroCluster switchover                 | BGP routing, LIF reachability, and Trident reconnect            |
+| Kubernetes worker          | Workload starts on another worker       | The new worker establishes an NVMe/TCP connection to the volume |
+| Management path disruption | Existing I/O can continue independently | New volumes, expansion, and snapshot operations can fail        |
+| Data path disruption       | Worker cannot reach the block device    | Inspect the data LIF, TCP 4420, and NVMe session                |
 
 A switchover therefore does not guarantee an interruption-free application. ONTAP, routing, CSI reconnection, Kubernetes scheduling, and the application itself all contribute to the actual recovery time.
 
@@ -234,11 +234,11 @@ The backend uses the Trident `ontap-san` driver with `sanType: nvme`. A shoot we
 
 Runtime communication is deliberately separated:
 
-| Source | Destination | Protocol | Purpose |
-|--------|-------------|----------|---------|
-| Gardener extension in the seed | ONTAP cluster management | HTTPS / TCP 443 | Manage SVMs, LIFs, aggregates, and users |
-| Trident controller in the shoot | SVM management LIF | HTTPS / TCP 443 | Manage volumes and snapshots |
-| Kubernetes worker | SVM data LIFs | NVMe/TCP / TCP 4420 | Workload block I/O |
+| Source                          | Destination              | Protocol            | Purpose                                  |
+|---------------------------------|--------------------------|---------------------|------------------------------------------|
+| Gardener extension in the seed  | ONTAP cluster management | HTTPS / TCP 443     | Manage SVMs, LIFs, aggregates, and users |
+| Trident controller in the shoot | SVM management LIF       | HTTPS / TCP 443     | Manage volumes and snapshots             |
+| Kubernetes worker               | SVM data LIFs            | NVMe/TCP / TCP 4420 | Workload block I/O                       |
 
 The management LIF does not carry application data. Conversely, the data LIFs are not used for administrative ONTAP operations. This separation is also the most important starting point for troubleshooting.
 
@@ -285,9 +285,9 @@ spec:
       storage: 10Gi
 ```
 
-| StorageClass | Use |
-|--------------|-----|
-| `ontap-gold` | Thin-provisioned block storage with `ext4`; volume expansion is allowed. |
+| StorageClass      | Use                                                                                        |
+|-------------------|--------------------------------------------------------------------------------------------|
+| `ontap-gold`      | Thin-provisioned block storage with `ext4`; volume expansion is allowed.                   |
 | `ontap-encrypted` | Client-side LUKS2-encrypted block storage; the application provides the passphrase Secret. |
 
 > **Important:** With `ontap-encrypted`, ONTAP sees only encrypted blocks. If the LUKS Secret is lost, the data cannot be recovered.

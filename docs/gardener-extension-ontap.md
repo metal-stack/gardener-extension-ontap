@@ -14,12 +14,12 @@ The extension connects three administrative layers:
 
 The extension runs in the seed cluster. It is not a CSI driver and does not carry application data. NetApp Trident in the shoot is the CSI driver; subsequent block I/O flows directly between Kubernetes workers and the ONTAP data LIFs.
 
-| Component | Runs in | Responsibility |
-|-----------|---------|----------------|
-| `gardener-extension-ontap` | Seed | Reconciles SVMs, LIFs, users, secrets, and shoot resources |
-| Trident controller | Shoot, `kube-system` | Creates, expands, and deletes volumes and snapshots through the SVM management LIF |
-| Trident node plugin | Every shoot worker | Connects NVMe/TCP volumes and mounts them for pods |
-| ONTAP | Storage sites | Stores, replicates, and exposes block volumes |
+| Component                  | Runs in              | Responsibility                                                                     |
+|----------------------------|----------------------|------------------------------------------------------------------------------------|
+| `gardener-extension-ontap` | Seed                 | Reconciles SVMs, LIFs, users, secrets, and shoot resources                         |
+| Trident controller         | Shoot, `kube-system` | Creates, expands, and deletes volumes and snapshots through the SVM management LIF |
+| Trident node plugin        | Every shoot worker   | Connects NVMe/TCP volumes and mounts them for pods                                 |
+| ONTAP                      | Storage sites        | Stores, replicates, and exposes block volumes                                      |
 
 ---
 
@@ -43,12 +43,12 @@ spec:
 
 The controller needs four groups of inputs for reconciliation:
 
-| Input | Source | Use |
-|-------|--------|-----|
-| Shoot namespace | `Extension.metadata.namespace` | Derives shoot-specific names |
-| Management and data LIFs | `providerConfig.svmIpaddresses` | Network endpoints of the project SVM |
-| Metal project ID | Shoot annotation `cluster.metal-stack.io/project` | Identity and name of the project-specific SVM |
-| ONTAP cluster credentials | Extension controller configuration | Administrative REST connection to all MetroCluster sites |
+| Input                     | Source                                            | Use                                                      |
+|---------------------------|---------------------------------------------------|----------------------------------------------------------|
+| Shoot namespace           | `Extension.metadata.namespace`                    | Derives shoot-specific names                             |
+| Management and data LIFs  | `providerConfig.svmIpaddresses`                   | Network endpoints of the project SVM                     |
+| Metal project ID          | Shoot annotation `cluster.metal-stack.io/project` | Identity and name of the project-specific SVM            |
+| ONTAP cluster credentials | Extension controller configuration                | Administrative REST connection to all MetroCluster sites |
 
 `TridentConfig` validation requires exactly one non-empty management LIF and at least one data LIF. Every value must be a syntactically valid IP address. In the production deployment, the Cloud API supplies one management LIF and two data LIFs.
 
@@ -144,14 +144,14 @@ When ONTAP reports a BGP peer group, the extension creates the LIF as a `/32` VI
 
 Existing state is not accepted without inspection. The extension checks the state and repairs the parts it can reconstruct safely:
 
-| State | Reconciliation behavior |
-|-------|-------------------------|
-| SVM is not `running` | Reconciliation fails with an error |
-| NVMe is not enabled | Reconciliation fails with an error |
-| A new aggregate is missing from the SVM | The complete aggregate list is updated |
-| An expected LIF is missing | The LIF is created |
-| A LIF exists with a different IP | The discrepancy is logged but not corrected automatically |
-| The shoot user or seed Secret is missing | The missing state is reconstructed |
+| State                                    | Reconciliation behavior                                   |
+|------------------------------------------|-----------------------------------------------------------|
+| SVM is not `running`                     | Reconciliation fails with an error                        |
+| NVMe is not enabled                      | Reconciliation fails with an error                        |
+| A new aggregate is missing from the SVM  | The complete aggregate list is updated                    |
+| An expected LIF is missing               | The LIF is created                                        |
+| A LIF exists with a different IP         | The discrepancy is logged but not corrected automatically |
+| The shoot user or seed Secret is missing | The missing state is reconstructed                        |
 
 This behavior makes the controller idempotent: a subsequent reconciliation should not create a second set of resources blindly, but inspect and complete the existing state.
 
@@ -171,12 +171,12 @@ The username is derived from the shoot namespace. It must not begin with a hyphe
 
 The corresponding Secret is stored in the seed namespace `kube-system`. Its name combines the project SVM and shoot namespace. The extension subsequently transfers the credentials into the shoot's `kube-system` namespace as a separate `ManagedResource`.
 
-| ONTAP user | Seed Secret | Action |
-|------------|-------------|--------|
-| missing | missing | Generate a password, then create the user and Secret |
-| missing | present | Create the user with the password from the Secret |
-| present | missing or password empty | Reset the password and restore the Secret |
-| present | present | Accept the state |
+| ONTAP user | Seed Secret               | Action                                               |
+|------------|---------------------------|------------------------------------------------------|
+| missing    | missing                   | Generate a password, then create the user and Secret |
+| missing    | present                   | Create the user with the password from the Secret    |
+| present    | missing or password empty | Reset the password and restore the Secret            |
+| present    | present                   | Accept the state                                     |
 
 > **Known limitation:** If both the user and Secret exist, the current implementation does not verify whether their passwords actually match.
 
@@ -186,15 +186,15 @@ The corresponding Secret is stored in the seed namespace `kube-system`. Its name
 
 The extension does not execute an external Helm command in the shoot. It reads embedded YAML resources, substitutes project-specific values, and creates Gardener `ManagedResource` objects from them.
 
-| ManagedResource | Content | `keepObjects` |
-|-----------------|---------|:-------------:|
-| `snapshot-crds` | Kubernetes VolumeSnapshot CRDs | Yes |
-| `trident-crds` | Trident CustomResourceDefinitions | Yes |
-| `snapshot-controller` | Kubernetes snapshot controller | Yes |
-| `trident-backends` | `TridentBackendConfig`, StorageClasses, and `VolumeSnapshotClass` | Yes |
-| `trident-svm-secret` | Shoot-specific SVM credentials | No |
-| `trident-cwnp` | `allow-to-ontap` network policy | No |
-| `trident-init` | Trident operator and `TridentOrchestrator` | Yes |
+| ManagedResource       | Content                                                           | `keepObjects` |
+|-----------------------|-------------------------------------------------------------------|:-------------:|
+| `snapshot-crds`       | Kubernetes VolumeSnapshot CRDs                                    |      Yes      |
+| `trident-crds`        | Trident CustomResourceDefinitions                                 |      Yes      |
+| `snapshot-controller` | Kubernetes snapshot controller                                    |      Yes      |
+| `trident-backends`    | `TridentBackendConfig`, StorageClasses, and `VolumeSnapshotClass` |      Yes      |
+| `trident-svm-secret`  | Shoot-specific SVM credentials                                    |      No       |
+| `trident-cwnp`        | `allow-to-ontap` network policy                                   |      No       |
+| `trident-init`        | Trident operator and `TridentOrchestrator`                        |      Yes      |
 
 The backend configuration uses:
 
@@ -274,12 +274,12 @@ kubectl -n kube-system get secret -l app.kubernetes.io/part-of=gardener-extensio
 
 ### Common Failure Chains
 
-| Symptom | Inspection chain |
-|---------|------------------|
-| Backend does not become online | Shoot Secret → management LIF TCP 443 → SVM state → user → Trident logs |
-| PVC remains `Pending` | StorageClass selector → backend state → aggregates/capacity → controller events |
-| Mount fails | Trident node pod → `nvme-tcp` → data LIF TCP 4420 → NVMe session → optional LUKS Secret |
-| Reconciliation reports a LIF discrepancy | ProviderConfig IP → LIF name → ONTAP IP; the discrepancy is not currently repaired |
+| Symptom                                  | Inspection chain                                                                        |
+|------------------------------------------|-----------------------------------------------------------------------------------------|
+| Backend does not become online           | Shoot Secret → management LIF TCP 443 → SVM state → user → Trident logs                 |
+| PVC remains `Pending`                    | StorageClass selector → backend state → aggregates/capacity → controller events         |
+| Mount fails                              | Trident node pod → `nvme-tcp` → data LIF TCP 4420 → NVMe session → optional LUKS Secret |
+| Reconciliation reports a LIF discrepancy | ProviderConfig IP → LIF name → ONTAP IP; the discrepancy is not currently repaired      |
 
 ---
 
@@ -297,17 +297,17 @@ kubectl -n kube-system get secret -l app.kubernetes.io/part-of=gardener-extensio
 
 ## Source Code Map
 
-| Topic | Path in `gardener-extension-ontap` |
-|-------|------------------------------------|
-| Reconcile, restore, and delete | `pkg/controller/ontap/actuator.go` |
-| SVM creation and state inspection | `pkg/trident/svm.go` |
-| SVM users and seed Secrets | `pkg/trident/user.go` |
-| Trident ManagedResources | `pkg/trident/deploy_trident.go` |
-| Backend and StorageClasses | `charts/trident/resources/backends/` |
-| Shoot network policy | `charts/trident/resources/cwnps/` |
-| Shoot webhook | `pkg/webhook/shoot/mutator.go` |
-| ProviderConfig API | `pkg/apis/ontap/v1alpha1/types.go` |
-| Controller configuration | `pkg/apis/config/v1alpha1/types.go` |
+| Topic                             | Path in `gardener-extension-ontap`   |
+|-----------------------------------|--------------------------------------|
+| Reconcile, restore, and delete    | `pkg/controller/ontap/actuator.go`   |
+| SVM creation and state inspection | `pkg/trident/svm.go`                 |
+| SVM users and seed Secrets        | `pkg/trident/user.go`                |
+| Trident ManagedResources          | `pkg/trident/deploy_trident.go`      |
+| Backend and StorageClasses        | `charts/trident/resources/backends/` |
+| Shoot network policy              | `charts/trident/resources/cwnps/`    |
+| Shoot webhook                     | `pkg/webhook/shoot/mutator.go`       |
+| ProviderConfig API                | `pkg/apis/ontap/v1alpha1/types.go`   |
+| Controller configuration          | `pkg/apis/config/v1alpha1/types.go`  |
 
 ---
 
