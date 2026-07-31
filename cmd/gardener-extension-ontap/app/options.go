@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/install"
-	"github.com/metal-stack/metal-lib/pkg/pointer"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -151,7 +150,7 @@ func (options *Options) run(ctx context.Context) error {
 	ctrlConfig.Apply(&controller.DefaultAddOptions.Config)
 
 	options.controllerOptions.Completed().Apply(&controller.DefaultAddOptions.ControllerOptions)
-	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation, pointer.Pointer(extensionsv1alpha1.ExtensionClassShoot))
+	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation, new(extensionsv1alpha1.ExtensionClassShoot))
 	options.heartbeatOptions.Completed().Apply(&heartbeatcontroller.DefaultAddOptions)
 
 	atomicShootWebhookConfig, err := options.webhookOptions.Completed().AddToManager(ctx, mgr, nil, true)
