@@ -22,7 +22,7 @@ jobs:
 
     steps:
         - name: Checkout
-          uses: actions/checkout@v6
+          uses: actions/checkout@v7
 
         - name: Make tag
           run: |
@@ -32,7 +32,7 @@ jobs:
 
         - name: Docker meta
           id: meta
-          uses: docker/metadata-action@v5
+          uses: docker/metadata-action@v6
           with:
             images: |
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
