@@ -4,11 +4,16 @@ This repository contains the Gardener extension controller for managing the NetA
 
 ## Table of Contents
 
+- [Documentation](#documentation)
 - [Prerequisites](#prerequisites)
 - [Development Workflow](#development-workflow)
 - [Test Environment Setup](#test-environment-setup)
 - [Known Issues](#known-issues)
 - [TODO List](#todo-list)
+
+## Documentation
+
+Architecture, reconciliation, credential lifecycle, data paths, and troubleshooting are documented in the [documentation index](docs/README.md).
 
 ## Prerequisites
 
@@ -303,5 +308,4 @@ spec:
 
 - ✅ = Resource exists and is correct
 - ❌ = Resource missing or not functional
-
 
