@@ -81,7 +81,7 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 			TLS: &ontapclient.TLSConfig{
 				InsecureTLS: new(true),
 			},
-			ApiURL: cluster.IPAddress,
+			ApiURL: fmt.Sprintf("https://%s/api", cluster.IPAddress),
 		}
 
 		log.Info("adding cluster config", "cluster", cluster.Name, "user", cluster.Username, "ip", cluster.IPAddress)
