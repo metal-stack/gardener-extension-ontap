@@ -16,7 +16,6 @@ import (
 	"github.com/metal-stack/ontap-go/api/client/security"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -363,14 +362,12 @@ func generateSecurePassword() (string, error) {
 func buildSecret(secretName, userName, password, projectId string) *corev1.Secret {
 	// Build and return a Kubernetes secret
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
-			Namespace: svmSeedSecretNamespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/part-of":       "gardener-extension-ontap",
-				"app.kubernetes.io/managed-by":    "gardener",
-				"ontap.metal-stack.io/project-id": projectId,
-			},
+		Name:      secretName,
+		Namespace: svmSeedSecretNamespace,
+		Labels: map[string]string{
+			"app.kubernetes.io/part-of":       "gardener-extension-ontap",
+			"app.kubernetes.io/managed-by":    "gardener",
+			"ontap.metal-stack.io/project-id": projectId,
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{

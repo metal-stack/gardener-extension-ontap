@@ -17,7 +17,6 @@ import (
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -130,7 +129,7 @@ func DeployTrident(ctx context.Context, log logr.Logger, k8sClient client.Client
 		case tridentCwnp:
 			log.Info("case trident cwnp inside deploy", "cwnp", tridentCwnp)
 			var firewallNamespace corev1.Namespace
-			err = k8sClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: "firewall"}}), &firewallNamespace)
+			err = k8sClient.Get(ctx, client.ObjectKeyFromObject(&corev1.Namespace{Name: "firewall"}), &firewallNamespace)
 			if err != nil {
 				if errors.IsNotFound(err) {
 					log.Info("firewall ns doesn't exist, not deploying cwnps")

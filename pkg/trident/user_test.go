@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -34,10 +33,8 @@ func TestValidateAndEnsureCompleteUserState(t *testing.T) {
 
 		// K8s secret exists with password
 		existingSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "proj-1-proj--myshoot-credentials",
-				Namespace: "kube-system",
-			},
+			Name:      "proj-1-proj--myshoot-credentials",
+			Namespace: "kube-system",
 			Data: map[string][]byte{
 				"username": []byte("myshoot"),
 				"password": []byte("existing-pw"),
