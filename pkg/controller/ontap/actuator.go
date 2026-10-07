@@ -74,10 +74,14 @@ func createAdminClient(ctx context.Context, config config.ControllerConfiguratio
 
 	for _, cluster := range config.Clusters {
 		clusterClientConfig := ontapclient.Config{
-			AdminUser:     cluster.Username,
-			AdminPassword: cluster.Password,
-			Host:          cluster.IPAddress,
-			InsecureTLS:   true,
+			BasicAuth: &ontapclient.BasicAuthConfig{
+				User:     cluster.Username,
+				Password: cluster.Password,
+			},
+			TLS: &ontapclient.TLSConfig{
+				InsecureTLS: new(true),
+			},
+			ApiURL: fmt.Sprintf("https://%s/api", cluster.IPAddress),
 		}
 
 		log.Info("adding cluster config", "cluster", cluster.Name, "user", cluster.Username, "ip", cluster.IPAddress)

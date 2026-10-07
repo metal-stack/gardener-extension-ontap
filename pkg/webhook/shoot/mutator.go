@@ -102,10 +102,8 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		}) {
 			x.Spec.Template.Spec.Volumes = append(x.Spec.Template.Spec.Volumes, corev1.Volume{
 				Name: "modules-dir",
-				VolumeSource: corev1.VolumeSource{
-					HostPath: &corev1.HostPathVolumeSource{
-						Path: "/lib/modules",
-					},
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/lib/modules",
 				},
 			})
 		}
