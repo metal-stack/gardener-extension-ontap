@@ -169,7 +169,7 @@ func DeleteManagedResources(ctx context.Context, log logr.Logger, client client.
 	resources := slices.Clone(tridentResources)
 	slices.Reverse(resources)
 
-	for _, resource := range tridentResources {
+	for _, resource := range resources {
 		if err := managedresources.Delete(ctx, client, ex.Namespace, resource.name, false); err != nil {
 			log.Error(err, "unable to delete managedresource", "resource", resource.name)
 			return err
