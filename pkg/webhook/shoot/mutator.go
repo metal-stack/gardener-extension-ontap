@@ -27,7 +27,17 @@ type mutator struct {
 	logger  logr.Logger
 }
 
-const mutatedByOntap = "ontap.extensions.gardener.cloud/mutated-by-webhook"
+const (
+	mutatedByOntap = "ontap.extensions.gardener.cloud/mutated-by-webhook"
+
+	// tridentAPIGroup is the API group of all Trident custom resources.
+	tridentAPIGroup = "trident.netapp.io"
+)
+
+var tridentCRDsManagedByExtension = []string{
+	"tridentconfigurators." + tridentAPIGroup,
+	"tridentorchestrators." + tridentAPIGroup,
+}
 
 // NewMutator creates a new Mutator that mutates resources in the shoot cluster.
 func NewMutator(mgr manager.Manager) extensionswebhook.Mutator {
@@ -44,30 +54,13 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		return fmt.Errorf("could not create accessor during webhook %w", err)
 	}
 
-	tridentCRDs := map[string]bool{
-		"tridentactionmirrorupdates.trident.netapp.io":    true,
-		"tridentactionsnapshotrestores.trident.netapp.io": true,
-		"tridentbackendconfigs.trident.netapp.io":         true,
-		"tridentbackends.trident.netapp.io":               true,
-		"tridentgroupsnapshots.trident.netapp.io":         true,
-		"tridentmirrorrelationships.trident.netapp.io":    true,
-		"tridentnodes.trident.netapp.io":                  true,
-		"tridentsnapshotinfos.trident.netapp.io":          true,
-		"tridentsnapshots.trident.netapp.io":              true,
-		"tridentstorageclasses.trident.netapp.io":         true,
-		"tridenttransactions.trident.netapp.io":           true,
-		"tridentversions.trident.netapp.io":               true,
-		"tridentvolumepublications.trident.netapp.io":     true,
-		"tridentvolumereferences.trident.netapp.io":       true,
-		"tridentvolumes.trident.netapp.io":                true,
-	}
-
 	switch x := new.(type) {
 	case *apiextensionsv1.CustomResourceDefinition:
-		if tridentCRDs[x.Name] {
-			extensionswebhook.LogMutation(m.logger, x.Kind, x.Namespace, x.Name)
-			return m.mutateObjectLabels(ctx, x.Labels, false)
+		if x.Spec.Group != tridentAPIGroup || slices.Contains(tridentCRDsManagedByExtension, x.Name) {
+			return nil
 		}
+		extensionswebhook.LogMutation(m.logger, x.Kind, x.Namespace, x.Name)
+		x.Labels = mutateObjectLabels(x.Labels, false)
 	case *appsv1.DaemonSet:
 		if x.Name != "trident-node-linux" || x.Namespace != "kube-system" {
 			return nil
