@@ -113,20 +113,22 @@ func (m *mutator) Mutate(ctx context.Context, new, _ client.Object) error {
 		}
 		x.Spec.Template.Annotations["node.gardener.cloud/wait-for-csi-node-trident"] = "csi.trident.netapp.io"
 
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
+		x.Spec.Template.Labels = mutateObjectLabels(x.Spec.Template.Labels, true)
+		return nil
 	case *appsv1.Deployment:
 		if x.Name != "trident-controller" || x.Namespace != "kube-system" {
 			return nil
 		}
 		extensionswebhook.LogMutation(m.logger, x.Kind, new.GetNamespace(), new.GetName())
-		return m.mutateObjectLabels(ctx, x.Spec.Template.Labels, true)
+		x.Spec.Template.Labels = mutateObjectLabels(x.Spec.Template.Labels, true)
+		return nil
 	}
 
 	return nil
 }
 
-// mutateObjectLabels adds labels to the given object
-func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string, podLabels bool) error {
+// mutateObjectLabels adds labels to the given labels map and returns it.
+func mutateObjectLabels(labels map[string]string, podLabels bool) map[string]string {
 	if labels == nil {
 		labels = make(map[string]string)
 	}
@@ -140,5 +142,5 @@ func (m *mutator) mutateObjectLabels(_ context.Context, labels map[string]string
 		labels[v1beta1constants.LabelNetworkPolicyToDNS] = v1beta1constants.LabelNetworkPolicyAllowed
 	}
 
-	return nil
+	return labels
 }
