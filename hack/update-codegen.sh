@@ -18,7 +18,7 @@ source "${CODE_GEN_DIR}/kube_codegen.sh"
 
 rm -f "$(go env GOPATH)"/bin/*-gen
 
-CURRENT_DIR=$(dirname $0)
+CURRENT_DIR=$(dirname "$0")
 PROJECT_ROOT="${CURRENT_DIR}"/..
 
 
