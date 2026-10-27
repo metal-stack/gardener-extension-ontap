@@ -1,4 +1,5 @@
 ENSURE_GARDENER_MOD         := $(shell go get github.com/gardener/gardener@$$(go list -m -f "{{.Version}}" github.com/gardener/gardener))
+ENSURE_GARDENER_TOOLS_MOD   := $(shell go mod download github.com/gardener/gardener/hack/tools >/dev/null)
 GARDENER_HACK_DIR           := $(shell go list -m -f "{{.Dir}}" github.com/gardener/gardener)/hack
 IMAGE_TAG                   := $(or ${GITHUB_TAG_NAME}, latest)
 REGISTRY                    := ghcr.io/metal-stack
@@ -69,8 +70,8 @@ check-generate:
 	@bash $(GARDENER_HACK_DIR)/check-generate.sh $(REPO_ROOT)
 
 .PHONY: generate
-generate: $(VGOPATH) $(HELM) $(YQ)
-	@REPO_ROOT=$(REPO_ROOT) VGOPATH=$(VGOPATH) GARDENER_HACK_DIR=$(GARDENER_HACK_DIR) bash $(GARDENER_HACK_DIR)/generate-sequential.sh ./charts/... ./cmd/... ./pkg/...
+generate: $(HELM) $(YQ)
+	@REPO_ROOT=$(REPO_ROOT) GARDENER_HACK_DIR=$(GARDENER_HACK_DIR) bash $(GARDENER_HACK_DIR)/generate-sequential.sh ./charts/... ./cmd/... ./pkg/...
 
 .PHONY: generate-in-docker
 generate-in-docker: tidy install $(HELM) $(YQ)

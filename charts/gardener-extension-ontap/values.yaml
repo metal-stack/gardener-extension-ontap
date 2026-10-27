@@ -18,6 +18,7 @@ disableControllers: []
 disableWebhooks: []
 
 webhookConfig:
+  servicePort: 443
   serverPort: 443
 
 # imageVectorOverwrite: |
@@ -49,6 +50,3 @@ config:
 
 gardener:
   version: ""
-
-usablePorts:
-- 443  # webhook server

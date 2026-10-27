@@ -49,6 +49,7 @@ spec:
         - --log-level={{ .Values.logLevel | default "info" }}
         - --log-format={{ .Values.logFormat | default "json" }}
         - --webhook-config-namespace={{ .Release.Namespace }}
+        - --webhook-config-service-port={{ .Values.webhookConfig.servicePort }}
         - --webhook-config-server-port={{ .Values.webhookConfig.serverPort }}
         - --disable-webhooks={{ .Values.disableWebhooks | join "," }}
         env:

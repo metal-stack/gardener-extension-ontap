@@ -35,8 +35,8 @@ type AddOptions struct {
 	Config config.ControllerConfiguration
 	// IgnoreOperationAnnotation specifies whether to ignore the operation annotation or not.
 	IgnoreOperationAnnotation bool
-	// ExtensionClass defines the extension class this extension is responsible for.
-	ExtensionClass extensionsv1alpha1.ExtensionClass
+	// ExtensionClasses defines the extension classes this extension is responsible for.
+	ExtensionClasses []extensionsv1alpha1.ExtensionClass
 	// ShootWebhookConfig holds the current Shoot webhook configuration.
 	ShootWebhookConfig *atomic.Value
 }
@@ -62,6 +62,6 @@ func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddO
 		Resync:            0,
 		Predicates:        extension.DefaultPredicates(ctx, mgr, DefaultAddOptions.IgnoreOperationAnnotation),
 		Type:              controllerType,
-		ExtensionClasses:  []extensionsv1alpha1.ExtensionClass{opts.ExtensionClass},
+		ExtensionClasses:  opts.ExtensionClasses,
 	})
 }

@@ -12,7 +12,6 @@ import (
 	extensionscontroller "github.com/gardener/gardener/extensions/pkg/controller"
 	heartbeatcontroller "github.com/gardener/gardener/extensions/pkg/controller/heartbeat"
 	heartbeatcmd "github.com/gardener/gardener/extensions/pkg/controller/heartbeat/cmd"
-	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	ontapcmd "github.com/metal-stack/gardener-extension-ontap/pkg/cmd"
 	controller "github.com/metal-stack/gardener-extension-ontap/pkg/controller/ontap"
 
@@ -46,8 +45,9 @@ type Options struct {
 }
 
 func NewOptions() *Options {
+	generalOptions := &controllercmd.GeneralOptions{}
 	options := &Options{
-		generalOptions: &controllercmd.GeneralOptions{},
+		generalOptions: generalOptions,
 		ontapOptions:   &ontapcmd.AuthOptions{},
 		restOptions:    &controllercmd.RESTOptions{},
 		managerOptions: &controllercmd.ManagerOptions{
@@ -82,6 +82,7 @@ func NewOptions() *Options {
 			ExtensionName,
 			genericactuator.ShootWebhooksResourceName,
 			genericactuator.ShootWebhookNamespaceSelector("ontap"),
+			generalOptions,
 			&webhookcmd.ServerOptions{
 				Namespace: os.Getenv("WEBHOOK_CONFIG_NAMESPACE"),
 			},
@@ -150,10 +151,11 @@ func (options *Options) run(ctx context.Context) error {
 	ctrlConfig.Apply(&controller.DefaultAddOptions.Config)
 
 	options.controllerOptions.Completed().Apply(&controller.DefaultAddOptions.ControllerOptions)
-	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation, new(extensionsv1alpha1.ExtensionClassShoot))
+	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation)
+	controller.DefaultAddOptions.ExtensionClasses = options.generalOptions.Completed().ExtensionClasses
 	options.heartbeatOptions.Completed().Apply(&heartbeatcontroller.DefaultAddOptions)
 
-	atomicShootWebhookConfig, err := options.webhookOptions.Completed().AddToManager(ctx, mgr, nil, true)
+	atomicShootWebhookConfig, err := options.webhookOptions.Completed().AddToManager(ctx, mgr, nil)
 	if err != nil {
 		return fmt.Errorf("could not add webhooks to manager: %w", err)
 	}
