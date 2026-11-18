@@ -83,3 +83,12 @@ func TestValidateAndEnsureCompleteUserState(t *testing.T) {
 		mc.security.AssertCalled(t, "AccountCreate", mock.Anything, mock.Anything)
 	})
 }
+
+func TestBuildSecretUsesProvidedNamespace(t *testing.T) {
+	secret := buildSecret("my-secret", "custom-namespace", "my-user", "my-password", "my-project")
+
+	require.Equal(t, "my-secret", secret.Name)
+	require.Equal(t, "custom-namespace", secret.Namespace)
+	require.Equal(t, "my-user", secret.StringData["username"])
+	require.Equal(t, "my-password", secret.StringData["password"])
+}

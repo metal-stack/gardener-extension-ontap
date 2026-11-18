@@ -27,14 +27,13 @@ const (
 	svmShootSecretFilename = "svm-shoot-secret.yaml"
 	cwnpFileName           = "cwnp.yaml"
 
-	snapshotCRDsName       string = "snapshot-crds"
-	snapshotControllerMR   string = "snapshot-controller"
-	tridentCRDsName        string = "trident-crds"
-	tridentInitMR          string = "trident-init"
-	tridentBackendsMR      string = "trident-backends"
-	tridentSvmSecret       string = "trident-svm-secret"
-	tridentCwnp            string = "trident-cwnp"
-	svmSeedSecretNamespace string = "kube-system"
+	snapshotCRDsName     string = "snapshot-crds"
+	snapshotControllerMR string = "snapshot-controller"
+	tridentCRDsName      string = "trident-crds"
+	tridentInitMR        string = "trident-init"
+	tridentBackendsMR    string = "trident-backends"
+	tridentSvmSecret     string = "trident-svm-secret"
+	tridentCwnp          string = "trident-cwnp"
 
 	defaultChartPath = "charts/trident"
 )
