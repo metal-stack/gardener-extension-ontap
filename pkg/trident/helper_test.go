@@ -9,10 +9,12 @@ import (
 	mockstorage "github.com/metal-stack/ontap-go/test/mocks/storage"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/metal-stack/gardener-extension-ontap/pkg/ontap"
 )
 
 type mockOntapClient struct {
-	client     *ontapv1.Ontap
+	client     *ontap.Client
 	svm        *mocksvm.ClientService
 	storage    *mockstorage.ClientService
 	cluster    *mockcluster.ClientService
@@ -29,7 +31,7 @@ func newMockOntapClient() *mockOntapClient {
 	sec := &mocksecurity.ClientService{}
 	k8s := fake.NewClientBuilder().Build()
 	return &mockOntapClient{
-		client:     &ontapv1.Ontap{SVM: s, Storage: st, Cluster: cl, Networking: n, Security: sec},
+		client:     &ontap.Client{Ontap: &ontapv1.Ontap{SVM: s, Storage: st, Cluster: cl, Networking: n, Security: sec}},
 		svm:        s,
 		storage:    st,
 		cluster:    cl,

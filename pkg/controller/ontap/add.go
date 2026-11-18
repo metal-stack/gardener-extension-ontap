@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	// controllerType is the type of Extension resource.
-	controllerType = "ontap"
+	// ExtensionType is the type of the Extension resource handled by this controller.
+	ExtensionType = "ontap"
 	// ControllerName is the name of the registry cache service controller.
 	ControllerName = "ontap_controller"
 	// finalizerSuffix is the finalizer suffix for the registry cache service controller.
@@ -49,7 +49,7 @@ func AddToManager(ctx context.Context, mgr manager.Manager) error {
 // AddToManagerWithOptions adds a controller with the given Options to the given manager.
 // The opts.Reconciler is being set with a newly instantiated actuator.
 func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddOptions) error {
-	actuator, err := NewActuator(ctx, mgr, opts.Config, opts.ShootWebhookConfig)
+	actuator, err := NewActuator(mgr, opts.Config, opts.ShootWebhookConfig)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts AddO
 		FinalizerSuffix:   finalizerSuffix,
 		Resync:            0,
 		Predicates:        extension.DefaultPredicates(ctx, mgr, DefaultAddOptions.IgnoreOperationAnnotation),
-		Type:              controllerType,
+		Type:              ExtensionType,
 		ExtensionClasses:  opts.ExtensionClasses,
 	})
 }

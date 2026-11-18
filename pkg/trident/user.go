@@ -8,11 +8,11 @@ import (
 
 	"github.com/sethvargo/go-password/password"
 
-	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/models"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-openapi/strfmt"
+	"github.com/metal-stack/gardener-extension-ontap/pkg/ontap"
 	"github.com/metal-stack/ontap-go/api/client/security"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -88,7 +88,7 @@ func getClusterUsername(shootNamespace string) (string, error) {
 	return shootName, nil
 }
 
-func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, ontapClient *ontapv1.Ontap, opts userAndSecretOptions) error {
+func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, ontapClient *ontap.Client, opts userAndSecretOptions) error {
 	m.log.Info("Validating complete user state", "svm", opts.projectID, "shootNamespace", opts.shootNamespace)
 
 	clusterUsername, err := getClusterUsername(opts.shootNamespace)
@@ -142,7 +142,7 @@ func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, ont
 }
 
 // validateONTAPUserExists checks if ONTAP user exists by querying accounts
-func (m *SvmManager) validateONTAPUserExists(ctx context.Context, ontapClient *ontapv1.Ontap, username string, opts userAndSecretOptions) (bool, string, error) {
+func (m *SvmManager) validateONTAPUserExists(ctx context.Context, ontapClient *ontap.Client, username string, opts userAndSecretOptions) (bool, string, error) {
 	params := security.NewAccountCollectionGetParamsWithContext(ctx)
 	params.SetOwnerUUID(&opts.svmUUID)
 	params.SetName(&username)
@@ -160,7 +160,7 @@ func (m *SvmManager) validateONTAPUserExists(ctx context.Context, ontapClient *o
 }
 
 // attemptUserCreation tries to create a user with given password
-func (m *SvmManager) attemptUserCreation(ctx context.Context, ontapClient *ontapv1.Ontap, opts ontapUserOptions, password string) (string, error) {
+func (m *SvmManager) attemptUserCreation(ctx context.Context, ontapClient *ontap.Client, opts ontapUserOptions, password string) (string, error) {
 	var (
 		application = "http"
 		authMethod  = "password"
@@ -194,7 +194,7 @@ func (m *SvmManager) attemptUserCreation(ctx context.Context, ontapClient *ontap
 }
 
 // createONTAPUserWithPassword creates ONTAP user with specific password
-func (m *SvmManager) createONTAPUserWithPassword(ctx context.Context, ontapClient *ontapv1.Ontap, username string, opts userAndSecretOptions, password string) error {
+func (m *SvmManager) createONTAPUserWithPassword(ctx context.Context, ontapClient *ontap.Client, username string, opts userAndSecretOptions, password string) error {
 	ontapOpts := ontapUserOptions{
 		username:         username,
 		svmName:          opts.projectID,
@@ -212,7 +212,7 @@ func (m *SvmManager) createONTAPUserWithPassword(ctx context.Context, ontapClien
 }
 
 // resetONTAPUserPassword updates existing user password
-func (m *SvmManager) resetONTAPUserPassword(ctx context.Context, ontapClient *ontapv1.Ontap, username string, opts userAndSecretOptions) (string, error) {
+func (m *SvmManager) resetONTAPUserPassword(ctx context.Context, ontapClient *ontap.Client, username string, opts userAndSecretOptions) (string, error) {
 	password, err := generateSecurePassword()
 	if err != nil {
 		return "", err
@@ -227,7 +227,7 @@ func (m *SvmManager) resetONTAPUserPassword(ctx context.Context, ontapClient *on
 }
 
 // createCompleteUserAndSecret creates both ONTAP user and K8s secret
-func (m *SvmManager) createCompleteUserAndSecret(ctx context.Context, ontapClient *ontapv1.Ontap, username string, secretName string, opts userAndSecretOptions) error {
+func (m *SvmManager) createCompleteUserAndSecret(ctx context.Context, ontapClient *ontap.Client, username string, secretName string, opts userAndSecretOptions) error {
 	password, err := generateSecurePassword()
 	if err != nil {
 		return err
@@ -293,7 +293,7 @@ func (m *SvmManager) updateSecretInSeed(ctx context.Context, secretName, namespa
 }
 
 // CreateUserAndSecret creates an svm scoped account set to vsadmin role.
-func (m *SvmManager) CreateUserAndSecret(ctx context.Context, ontapClient *ontapv1.Ontap, opts userAndSecretOptions) error {
+func (m *SvmManager) CreateUserAndSecret(ctx context.Context, ontapClient *ontap.Client, opts userAndSecretOptions) error {
 	m.log.Info("Ensuring complete user and secret state", "svm", opts.projectID)
 
 	// Use comprehensive validation instead of simple creation
@@ -301,7 +301,7 @@ func (m *SvmManager) CreateUserAndSecret(ctx context.Context, ontapClient *ontap
 }
 
 // updateExistingUserPassword updates the password for an existing ONTAP user
-func (m *SvmManager) updateExistingUserPassword(ctx context.Context, ontapClient *ontapv1.Ontap, username, svmName, password string) (string, error) {
+func (m *SvmManager) updateExistingUserPassword(ctx context.Context, ontapClient *ontap.Client, username, svmName, password string) (string, error) {
 	secparams := security.NewAccountPasswordCreateParamsWithContext(ctx)
 	secparams.Info = &models.AccountPassword{
 		Name:     new(username),

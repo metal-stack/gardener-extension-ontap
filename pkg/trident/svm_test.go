@@ -1,13 +1,11 @@
 package trident
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
 	"github.com/go-logr/logr"
 	"github.com/go-openapi/strfmt"
-	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	"github.com/metal-stack/ontap-go/api/client/networking"
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
@@ -16,51 +14,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/metal-stack/gardener-extension-ontap/pkg/ontap"
 )
 
-func TestGetWriteClient(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("selects client with fewest volumes", func(t *testing.T) {
-		mc1, mc2 := newMockOntapClient(), newMockOntapClient()
-		mc1.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
-			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
-				AggregateResponseInlineRecords: []*models.Aggregate{
-					{Name: new("a1"), UUID: new("u1"), VolumeCount: new(int64(30))},
-				},
-			}}, nil)
-		mc2.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
-			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
-				AggregateResponseInlineRecords: []*models.Aggregate{
-					{Name: new("a2"), UUID: new("u2"), VolumeCount: new(int64(5))},
-				},
-			}}, nil)
-
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
-		got, err := m.getWriteClient(ctx)
-		require.NoError(t, err)
-		assert.Equal(t, mc2.client, got)
-	})
-
-	t.Run("error on api failure", func(t *testing.T) {
-		mc := newMockOntapClient()
-		mc.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
-			Return(nil, fmt.Errorf("connection refused"))
-
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc.client}, nil)
-		_, err := m.getWriteClient(ctx)
-		require.Error(t, err)
-	})
-
-	t.Run("no clients", func(t *testing.T) {
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{}, nil)
-		_, err := m.getWriteClient(ctx)
-		require.Error(t, err)
-	})
-}
-
 func TestGetAllNodesInCluster(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("returns uuids for 2+ nodes", func(t *testing.T) {
 		mc := newMockOntapClient()
@@ -97,7 +56,7 @@ func TestGetAllNodesInCluster(t *testing.T) {
 }
 
 func TestGetSVMByName(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	runningSvmGet := &s_vm.SvmGetOK{Payload: &models.Svm{State: new("running")}}
 
@@ -111,7 +70,7 @@ func TestGetSVMByName(t *testing.T) {
 			}}, nil)
 		mc.svm.On("SvmGet", mock.Anything, mock.Anything).Return(runningSvmGet, nil)
 
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc.client}, nil)
+		m := NewSvmManager(logr.Discard(), []*ontap.Client{mc.client}, nil)
 		uuid, c, err := m.GetSVMByName(ctx, "proj-1")
 		require.NoError(t, err)
 		assert.Equal(t, "uuid-1", *uuid)
@@ -128,7 +87,7 @@ func TestGetSVMByName(t *testing.T) {
 			}}, nil)
 		mc.svm.On("SvmGet", mock.Anything, mock.Anything).Return(runningSvmGet, nil)
 
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc.client}, nil)
+		m := NewSvmManager(logr.Discard(), []*ontap.Client{mc.client}, nil)
 		uuid, _, err := m.GetSVMByName(ctx, "proj-1")
 		require.NoError(t, err)
 		assert.Equal(t, "uuid-mc", *uuid)
@@ -141,7 +100,7 @@ func TestGetSVMByName(t *testing.T) {
 				SvmResponseInlineRecords: []*models.Svm{},
 			}}, nil)
 
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc.client}, nil)
+		m := NewSvmManager(logr.Discard(), []*ontap.Client{mc.client}, nil)
 		_, _, err := m.GetSVMByName(ctx, "proj-1")
 		require.ErrorIs(t, err, ErrSvmNotFound)
 	})
@@ -158,7 +117,7 @@ func TestGetSVMByName(t *testing.T) {
 			}}, nil)
 		mc2.svm.On("SvmGet", mock.Anything, mock.Anything).Return(runningSvmGet, nil)
 
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
+		m := NewSvmManager(logr.Discard(), []*ontap.Client{mc1.client, mc2.client}, nil)
 		uuid, _, err := m.GetSVMByName(ctx, "proj-1")
 		require.NoError(t, err)
 		assert.Equal(t, "uuid-2", *uuid)
@@ -166,7 +125,7 @@ func TestGetSVMByName(t *testing.T) {
 }
 
 func TestGetSVMByName_MultiClientFailover(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	runningSvmGet := &s_vm.SvmGetOK{Payload: &models.Svm{State: new("running")}}
 	stoppedSvmGet := &s_vm.SvmGetOK{Payload: &models.Svm{State: new("stopped")}}
 
@@ -191,7 +150,7 @@ func TestGetSVMByName_MultiClientFailover(t *testing.T) {
 			}}, nil)
 		mc2.svm.On("SvmGet", mock.Anything, mock.Anything).Return(runningSvmGet, nil)
 
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
+		m := NewSvmManager(logr.Discard(), []*ontap.Client{mc1.client, mc2.client}, nil)
 		uuid, c, err := m.GetSVMByName(ctx, "proj-1")
 		require.NoError(t, err)
 		assert.Equal(t, "uuid-c2", *uuid)
@@ -213,7 +172,7 @@ func TestGetSVMByName_MultiClientFailover(t *testing.T) {
 			}}, nil)
 		mc2.svm.On("SvmGet", mock.Anything, mock.Anything).Return(runningSvmGet, nil)
 
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
+		m := NewSvmManager(logr.Discard(), []*ontap.Client{mc1.client, mc2.client}, nil)
 		uuid, c, err := m.GetSVMByName(ctx, "proj-1")
 		require.NoError(t, err)
 		assert.Equal(t, "uuid-mc", *uuid)
@@ -231,7 +190,7 @@ func TestGetSVMByName_MultiClientFailover(t *testing.T) {
 			}}, nil)
 		mc.svm.On("SvmGet", mock.Anything, mock.Anything).Return(runningSvmGet, nil)
 
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc.client}, nil)
+		m := NewSvmManager(logr.Discard(), []*ontap.Client{mc.client}, nil)
 		uuid, _, err := m.GetSVMByName(ctx, "proj-1")
 		require.NoError(t, err)
 		assert.Equal(t, "uuid-primary", *uuid, "primary name should be preferred over -mc")
@@ -239,7 +198,7 @@ func TestGetSVMByName_MultiClientFailover(t *testing.T) {
 }
 
 func TestIsRunningSVM(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := NewSvmManager(logr.Discard(), nil, nil)
 
 	t.Run("nil uuid returns false", func(t *testing.T) {
@@ -268,54 +227,8 @@ func TestIsRunningSVM(t *testing.T) {
 	})
 }
 
-func TestGetWriteClient_FailoverBehavior(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("first client down fails entire selection", func(t *testing.T) {
-		// Documents current behavior: getWriteClient does NOT skip failing clients
-		mc1, mc2 := newMockOntapClient(), newMockOntapClient()
-		mc1.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
-			Return(nil, fmt.Errorf("cluster unreachable"))
-		mc2.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
-			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
-				AggregateResponseInlineRecords: []*models.Aggregate{
-					{Name: new("a1"), UUID: new("u1"), VolumeCount: new(int64(5))},
-				},
-			}}, nil)
-
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
-		_, err := m.getWriteClient(ctx)
-		require.Error(t, err, "getWriteClient fails hard if any client is unreachable")
-		assert.Contains(t, err.Error(), "cluster unreachable")
-	})
-
-	t.Run("nil volume counts skipped, still selects correctly", func(t *testing.T) {
-		mc1, mc2 := newMockOntapClient(), newMockOntapClient()
-		// Client1: all aggregates have nil volume counts → treated as 0
-		mc1.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
-			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
-				AggregateResponseInlineRecords: []*models.Aggregate{
-					{Name: new("a1"), UUID: new("u1"), VolumeCount: nil},
-					{Name: new("a2"), UUID: new("u2"), VolumeCount: nil},
-				},
-			}}, nil)
-		// Client2: has real volume counts
-		mc2.storage.On("AggregateCollectionGet", mock.Anything, mock.Anything).
-			Return(&storage.AggregateCollectionGetOK{Payload: &models.AggregateResponse{
-				AggregateResponseInlineRecords: []*models.Aggregate{
-					{Name: new("a3"), UUID: new("u3"), VolumeCount: new(int64(10))},
-				},
-			}}, nil)
-
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc1.client, mc2.client}, nil)
-		got, err := m.getWriteClient(ctx)
-		require.NoError(t, err)
-		assert.Equal(t, mc1.client, got, "nil volumes counted as 0 → client1 appears emptier")
-	})
-}
-
 func TestGetExistingNetworkInterfaces(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := NewSvmManager(logr.Discard(), nil, nil)
 
 	t.Run("skips interfaces with nil name or ip", func(t *testing.T) {
@@ -338,7 +251,7 @@ func TestGetExistingNetworkInterfaces(t *testing.T) {
 }
 
 func TestValidateAndEnsureDataLIFs_IPMismatch(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := NewSvmManager(logr.Discard(), nil, nil)
 
 	t.Run("tolerates ip mismatch without creating new lif", func(t *testing.T) {
@@ -359,7 +272,7 @@ func TestValidateAndEnsureDataLIFs_IPMismatch(t *testing.T) {
 }
 
 func TestValidateSVMRunningState(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := NewSvmManager(logr.Discard(), nil, nil)
 
 	t.Run("ok when running with nvme", func(t *testing.T) {
@@ -397,7 +310,7 @@ func TestValidateSVMRunningState(t *testing.T) {
 }
 
 func TestCreateNetworkInterfaceForSvm(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := NewSvmManager(logr.Discard(), nil, nil)
 
 	noBgp := &networking.NetworkIPBgpPeerGroupsGetOK{
@@ -458,7 +371,7 @@ func TestCreateNetworkInterfaceForSvm(t *testing.T) {
 }
 
 func TestValidateAndEnsureDataLIFs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := NewSvmManager(logr.Discard(), nil, nil)
 
 	t.Run("no-op when all lifs exist", func(t *testing.T) {
@@ -496,7 +409,7 @@ func TestValidateAndEnsureDataLIFs(t *testing.T) {
 }
 
 func TestValidateAndEnsureManagementLIF(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := NewSvmManager(logr.Discard(), nil, nil)
 
 	t.Run("no-op when exists with correct ip", func(t *testing.T) {
@@ -534,7 +447,7 @@ func TestValidateAndEnsureManagementLIF(t *testing.T) {
 }
 
 func TestValidateAndEnsureAggregates(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := NewSvmManager(logr.Discard(), nil, nil)
 
 	t.Run("no-op when all aggregates already assigned", func(t *testing.T) {
