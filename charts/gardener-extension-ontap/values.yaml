@@ -41,11 +41,11 @@ config:
     contentType: application/json
     qps: 100
     burst: 130
-  clusters: 
+  clusters:
   - name: cluster-a
-    ipaddress: 192.168.10.11
-    username: admin 
-    password: fsqe2020
+    ipaddress: 1.2.3.4
+    username:
+    password:
 
 
 gardener:

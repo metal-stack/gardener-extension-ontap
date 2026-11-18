@@ -165,6 +165,52 @@ func TestGetSVMByName(t *testing.T) {
 	})
 }
 
+func TestNilPayloads(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name    string
+		mock    func(*mockOntapClient)
+		call    func(*SvmManager, *ontapv1.Ontap) error
+		wantErr string
+	}{
+		{
+			name: "getAllNodesInCluster returns error on nil payload",
+			mock: func(mc *mockOntapClient) {
+				mc.cluster.On("NodesGet", mock.Anything, mock.Anything).
+					Return(&cluster.NodesGetOK{Payload: nil}, nil)
+			},
+			call: func(m *SvmManager, c *ontapv1.Ontap) error {
+				_, err := m.getAllNodesInCluster(ctx, c)
+				return err
+			},
+			wantErr: "no node information returned",
+		},
+		{
+			name: "GetSVMByName returns error on nil payload",
+			mock: func(mc *mockOntapClient) {
+				mc.svm.On("SvmCollectionGet", mock.Anything, mock.Anything).
+					Return(&s_vm.SvmCollectionGetOK{Payload: nil}, nil)
+			},
+			call: func(m *SvmManager, c *ontapv1.Ontap) error {
+				_, _, err := m.GetSVMByName(ctx, "proj-1")
+				return err
+			},
+			wantErr: "empty SVM response",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mc := newMockOntapClient()
+			tt.mock(mc)
+			m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc.client}, nil)
+			err := tt.call(m, mc.client)
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
 func TestGetSVMByName_MultiClientFailover(t *testing.T) {
 	ctx := context.Background()
 	runningSvmGet := &s_vm.SvmGetOK{Payload: &models.Svm{State: new("running")}}
