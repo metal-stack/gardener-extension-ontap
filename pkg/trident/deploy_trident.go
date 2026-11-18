@@ -36,6 +36,9 @@ const (
 	tridentCwnp            string = "trident-cwnp"
 	svmSeedSecretNamespace string = "kube-system"
 
+	// managedResourceOrigin identifies this extension as the creator of the managed resources.
+	managedResourceOrigin = "gardener-extension-ontap"
+
 	defaultChartPath = "charts/trident"
 )
 
@@ -240,7 +243,6 @@ func deployResources(
 	waitForHealthy bool,
 	keepObjects bool,
 ) error {
-	// Check if there are any resources to deploy
 	if len(resourceYamls) == 0 {
 		log.Info("no resources found to deploy for managed resource, skipping deployment", "name", resourceName, "namespace", namespace)
 		return nil
@@ -248,13 +250,12 @@ func deployResources(
 
 	log.Info("deploying YAML files for managed resource", "name", resourceName, "namespace", namespace, "count", len(resourceYamls))
 
-	// Create the managed resource
 	if err := managedresources.CreateForShoot(
 		ctx,
 		k8sClient,
 		namespace,
 		resourceName,
-		"kube-system", // Origin label
+		managedResourceOrigin,
 		keepObjects,
 		resourceYamls,
 	); err != nil {
