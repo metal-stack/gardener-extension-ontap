@@ -7,6 +7,7 @@ import (
 	healthcheckconfig "github.com/gardener/gardener/extensions/pkg/apis/config/v1alpha1"
 	configapi "github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config/v1alpha1"
+	configvalidation "github.com/metal-stack/gardener-extension-ontap/pkg/apis/config/validation"
 
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -54,9 +55,9 @@ func (o *AuthOptions) Complete() error {
 		return err
 	}
 
-	// if errs := validation.ValidateConfiguration(&config); len(errs) > 0 {
-	// 	return errs.ToAggregate()
-	// }
+	if errs := configvalidation.ValidateControllerConfiguration(&config); len(errs) > 0 {
+		return errs.ToAggregate()
+	}
 
 	o.config = &AuthServiceConfig{
 		config: config,
