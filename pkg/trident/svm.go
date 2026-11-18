@@ -243,12 +243,11 @@ func (m *SvmManager) getAllNodesInCluster(ctx context.Context, ontapClient *onta
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch nodes: %w", err)
 	}
+	if result == nil || result.Payload == nil {
+		return nil, errors.New("no node information returned")
+	}
 	for _, node := range result.Payload.NodeResponseInlineRecords {
 		m.log.Info("Node in Response", "nodes", node)
-	}
-
-	if result.Payload == nil {
-		return nil, errors.New("no node information returned")
 	}
 
 	if len(result.Payload.NodeResponseInlineRecords) == 0 {
@@ -605,6 +604,9 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 		if err != nil {
 			m.log.Error(err, "failed to fetch SVMs from client, trying next")
 			continue
+		}
+		if svmGetOK == nil || svmGetOK.Payload == nil {
+			return nil, nil, fmt.Errorf("empty SVM response while looking up %q", svmName)
 		}
 
 		if len(svmGetOK.Payload.SvmResponseInlineRecords) == 0 {
