@@ -123,7 +123,7 @@ func (m *SvmManager) validateAndEnsureCompleteUserState(ctx context.Context, ont
 		if err != nil {
 			return err
 		}
-		return m.buildAndCreateSecretInSeed(ctx, secretName, clusterUsername, newPassword, opts.projectID)
+		return m.buildAndCreateSecretInSeed(ctx, secretName, opts.svmSeedSecretNamespace, clusterUsername, newPassword, opts.projectID)
 
 	case errors.Is(secretErr, ErrSeedSecretMissing) && !ontapUserExists:
 		// Neither exists - create both
@@ -247,7 +247,7 @@ func (m *SvmManager) createCompleteUserAndSecret(ctx context.Context, ontapClien
 	}
 
 	// Create K8s secret
-	err = m.buildAndCreateSecretInSeed(ctx, secretName, username, password, opts.projectID)
+	err = m.buildAndCreateSecretInSeed(ctx, secretName, opts.svmSeedSecretNamespace, username, password, opts.projectID)
 	if err != nil {
 		return fmt.Errorf("failed to create K8s secret after ONTAP user creation: %w", err)
 	}
@@ -272,7 +272,7 @@ func (m *SvmManager) updateSecretInSeed(ctx context.Context, secretName, namespa
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Secret doesn't exist, create it
-			return m.buildAndCreateSecretInSeed(ctx, secretName, username, password, projectId)
+			return m.buildAndCreateSecretInSeed(ctx, secretName, namespace, username, password, projectId)
 		}
 		return fmt.Errorf("failed to get existing secret: %w", err)
 	}
@@ -359,11 +359,11 @@ func generateSecurePassword() (string, error) {
 }
 
 // buildSecret creates a secret with the SVM credentials in the specified namespace
-func buildSecret(secretName, userName, password, projectId string) *corev1.Secret {
+func buildSecret(secretName, namespace, userName, password, projectId string) *corev1.Secret {
 	// Build and return a Kubernetes secret
 	return &corev1.Secret{
 		Name:      secretName,
-		Namespace: svmSeedSecretNamespace,
+		Namespace: namespace,
 		Labels: map[string]string{
 			"app.kubernetes.io/part-of":       "gardener-extension-ontap",
 			"app.kubernetes.io/managed-by":    "gardener",
@@ -377,14 +377,14 @@ func buildSecret(secretName, userName, password, projectId string) *corev1.Secre
 	}
 }
 
-func (m *SvmManager) buildAndCreateSecretInSeed(ctx context.Context, secretName, userName, password, projectId string) error {
-	tridentSecret := buildSecret(secretName, userName, password, projectId)
+func (m *SvmManager) buildAndCreateSecretInSeed(ctx context.Context, secretName, namespace, userName, password, projectId string) error {
+	tridentSecret := buildSecret(secretName, namespace, userName, password, projectId)
 	// make this use of managedResource aswell, otherwise seed secret can be deleted
 	if err := m.seedClient.Create(ctx, tridentSecret); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			// Secret already exists, try to update it instead
 			m.log.Info("Secret already exists, updating it", "secretName", secretName)
-			return m.updateSecretInSeed(ctx, secretName, svmSeedSecretNamespace, userName, password, projectId)
+			return m.updateSecretInSeed(ctx, secretName, namespace, userName, password, projectId)
 		}
 		return fmt.Errorf("creating secret in seed failed: %w", err)
 	}
