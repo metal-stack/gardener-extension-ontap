@@ -1,4 +1,3 @@
-// Package ontap constructs ONTAP API clients from the extension controller configuration.
 package ontap
 
 import (
@@ -6,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/go-logr/logr"
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	ontapgoclient "github.com/metal-stack/ontap-go/pkg/client"
@@ -14,85 +12,52 @@ import (
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 )
 
-// New constructs one ONTAP API client per configured cluster without performing I/O.
-func New(config config.ControllerConfiguration) ([]*ontapv1.Ontap, error) {
-	var ontapConfigs []ontapgoclient.Config
+type Client struct {
+	*ontapv1.Ontap
+	clusterName string
+}
 
-	for _, clusterConfig := range config.Clusters {
-		ontapConfigs = append(ontapConfigs, ontapgoclient.Config{
+func NewClients(config config.ControllerConfiguration) ([]*Client, error) {
+	var clients = make([]*Client, 0, len(config.Clusters))
+
+	for _, cluster := range config.Clusters {
+		c, err := ontapgoclient.NewAPIClient(ontapgoclient.Config{
 			BasicAuth: &ontapgoclient.BasicAuthConfig{
-				User:     clusterConfig.Username,
-				Password: clusterConfig.Password,
+				User:     cluster.Username,
+				Password: cluster.Password,
 			},
 			TLS: &ontapgoclient.TLSConfig{
 				InsecureTLS: new(true),
 			},
-			ApiURL: fmt.Sprintf("https://%s/api", clusterConfig.IPAddress),
+			ApiURL: fmt.Sprintf("https://%s/api", cluster.IPAddress),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("unable to create ontap client: %w", err)
+		}
+
+		clients = append(clients, &Client{
+			Ontap:       c,
+			clusterName: cluster.Name,
 		})
 	}
 
-	metroClusterClient, err := ontapgoclient.NewMetroClusterClient(ontapConfigs)
-	if err != nil {
-		return nil, err
-	}
-	if metroClusterClient == nil || len(*metroClusterClient) == 0 {
-		return nil, fmt.Errorf("couldn't initialize any ONTAP clients")
-	}
-
-	mcClients := *metroClusterClient
-	clients := make([]*ontapv1.Ontap, 0, len(mcClients))
-	for i := range mcClients {
-		clients = append(clients, &mcClients[i])
-	}
-
 	return clients, nil
 }
 
-// NewConnected constructs ONTAP clients and verifies connectivity to every configured cluster.
-func NewConnected(ctx context.Context, log logr.Logger, config config.ControllerConfiguration) ([]*ontapv1.Ontap, error) {
-	clients, err := New(config)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := checkClients(ctx, log, config, clients); err != nil {
-		return nil, err
-	}
-
-	return clients, nil
-}
-
-// CheckConnectivity verifies connectivity to every configured cluster.
-func CheckConnectivity(ctx context.Context, log logr.Logger, config config.ControllerConfiguration) error {
-	clients, err := New(config)
-	if err != nil {
-		return err
-	}
-
-	return checkClients(ctx, log, config, clients)
-}
-
-func checkClients(ctx context.Context, log logr.Logger, config config.ControllerConfiguration, clients []*ontapv1.Ontap) error {
+func CheckConnectivity(ctx context.Context, clients []*Client) error {
 	var errs []error
-	for i, ontapClient := range clients {
-		clusterName := config.Clusters[i].Name
 
-		params := cluster.NewClusterGetParamsWithContext(ctx)
-		result, err := ontapClient.Cluster.ClusterGet(params, nil)
+	for _, client := range clients {
+		result, err := client.Cluster.ClusterGet(cluster.NewClusterGetParamsWithContext(ctx), nil)
 		if err != nil {
-			err := fmt.Errorf("failed to connect to ONTAP cluster %q: %w", clusterName, err)
-			errs = append(errs, err)
-			log.Error(err, "ONTAP cluster health check failed", "cluster", clusterName)
-			continue
-		}
-		if result == nil || result.Payload == nil {
-			err := fmt.Errorf("ONTAP cluster %q returned an empty response", clusterName)
-			errs = append(errs, err)
-			log.Error(err, "ONTAP cluster health check failed", "cluster", clusterName)
+			errs = append(errs, fmt.Errorf("failed to connect to ontap cluster %q: %w", client.clusterName, err))
 			continue
 		}
 
-		log.Info("Successfully connected to ONTAP cluster", "cluster", clusterName)
+		if result == nil || result.Payload == nil {
+			errs = append(errs, fmt.Errorf("ontap cluster %q returned an empty response", client.clusterName))
+			continue
+		}
 	}
 
 	return errors.Join(errs...)

@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
+	"github.com/metal-stack/gardener-extension-ontap/pkg/ontap"
 )
 
 var (
@@ -60,11 +61,11 @@ type networkInterfaceOptions struct {
 
 type SvmManager struct {
 	log        logr.Logger
-	clients    []*ontapv1.Ontap
+	clients    []*ontap.Client
 	seedClient client.Client
 }
 
-func NewSvmManager(log logr.Logger, clients []*ontapv1.Ontap, seedClient client.Client) *SvmManager {
+func NewSvmManager(log logr.Logger, clients []*ontap.Client, seedClient client.Client) *SvmManager {
 	return &SvmManager{
 		log:        log,
 		clients:    clients,
@@ -404,7 +405,7 @@ func (m *SvmManager) validateAndEnsureAggregates(ctx context.Context, ontapClien
 }
 
 // validateAndEnsureCompleteSVMState validates all components of an SVM and creates missing parts
-func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, activeClient *ontapv1.Ontap, svmUUID, svmName string, opts CreateSVMOptions) error {
+func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, activeClient *ontap.Client, svmUUID, svmName string, opts CreateSVMOptions) error {
 	m.log.Info("Validating complete SVM state", "svmName", svmName, "uuid", svmUUID)
 
 	// 1. Validate SVM is running and NVMe enabled
@@ -589,7 +590,7 @@ func (m *SvmManager) EnsureCompleteSVM(ctx context.Context, opts CreateSVMOption
 
 // GetSVMByName searches all clients for a running SVM matching svmName (or svmName-mc).
 // Returns the UUID, the ONTAP client where the SVM is running, and an error.
-func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string, *ontapv1.Ontap, error) {
+func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string, *ontap.Client, error) {
 	var fallbackName string
 	if !strings.HasSuffix(svmName, "-mc") {
 		fallbackName = fmt.Sprintf("%s-mc", svmName)
@@ -647,7 +648,7 @@ func (m *SvmManager) GetSVMByName(ctx context.Context, svmName string) (*string,
 
 // isRunningSVM checks whether a single SVM candidate is in "running" state.
 // Returns the UUID and true if it is running, nil and false otherwise.
-func (m *SvmManager) isRunningSVM(ctx context.Context, ontapClient *ontapv1.Ontap, uuid *string, name string) (*string, bool) {
+func (m *SvmManager) isRunningSVM(ctx context.Context, ontapClient *ontap.Client, uuid *string, name string) (*string, bool) {
 	if uuid == nil {
 		return nil, false
 	}

@@ -1,11 +1,9 @@
 package ontap
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
-	"github.com/go-logr/logr"
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	"github.com/metal-stack/ontap-go/api/models"
@@ -16,8 +14,8 @@ import (
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 )
 
-func TestNew(t *testing.T) {
-	clients, err := New(config.ControllerConfiguration{Clusters: []config.Cluster{
+func TestNewClients(t *testing.T) {
+	clients, err := NewClients(config.ControllerConfiguration{Clusters: []config.Cluster{
 		{Name: "cluster-a", IPAddress: "192.168.10.11", Username: "admin", Password: "password-a"},
 		{Name: "cluster-b", IPAddress: "192.168.10.12", Username: "admin", Password: "password-b"},
 	}})
@@ -26,8 +24,8 @@ func TestNew(t *testing.T) {
 	require.Len(t, clients, 2)
 }
 
-func TestNewWithoutClusters(t *testing.T) {
-	_, err := New(config.ControllerConfiguration{})
+func TestNewClientsWithoutClusters(t *testing.T) {
+	_, err := NewClients(config.ControllerConfiguration{})
 
 	require.Error(t, err)
 }
@@ -81,7 +79,7 @@ func TestCheckClients(t *testing.T) {
 				clients = append(clients, &ontapv1.Ontap{Cluster: service})
 			}
 
-			err := checkClients(context.Background(), logr.Discard(), controllerConfig, clients)
+			err := CheckConnectivity(t.Context(), clients)
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 				return

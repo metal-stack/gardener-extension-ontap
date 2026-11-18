@@ -18,16 +18,14 @@ import (
 const ontapHealthCheckTimeout = 30 * time.Second
 
 type ontapHealthChecker struct {
-	logger    logr.Logger
-	config    config.ControllerConfiguration
-	checkFunc func(context.Context, logr.Logger, config.ControllerConfiguration) error
+	logger logr.Logger
+	config config.ControllerConfiguration
 }
 
 // NewONTAPHealthCheck returns a health check for ONTAP cluster connectivity.
 func NewONTAPHealthCheck(config config.ControllerConfiguration) healthcheck.HealthCheck {
 	return &ontapHealthChecker{
-		config:    config,
-		checkFunc: ontap.CheckConnectivity,
+		config: config,
 	}
 }
 
@@ -39,7 +37,15 @@ func (h *ontapHealthChecker) Check(ctx context.Context, _ types.NamespacedName) 
 	checkCtx, cancel := context.WithTimeout(ctx, ontapHealthCheckTimeout)
 	defer cancel()
 
-	if err := h.checkFunc(checkCtx, h.logger, h.config); err != nil {
+	clients, err := ontap.NewClients(h.config)
+	if err != nil {
+		return &healthcheck.SingleCheckResult{
+			Status: gardencorev1beta1.ConditionFalse,
+			Detail: err.Error(),
+		}, nil
+	}
+
+	if err := ontap.CheckConnectivity(checkCtx, clients); err != nil {
 		h.logger.Error(err, "ONTAP health check failed")
 		return &healthcheck.SingleCheckResult{
 			Status: gardencorev1beta1.ConditionFalse,
