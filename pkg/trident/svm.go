@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
 	"github.com/avast/retry-go/v4"
 
 	"github.com/go-logr/logr"
-	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	"github.com/metal-stack/ontap-go/api/client/networking"
 	"github.com/metal-stack/ontap-go/api/client/s_vm"
@@ -61,7 +59,7 @@ type networkInterfaceOptions struct {
 
 type SvmManager struct {
 	log        logr.Logger
-	clients    []*ontap.Client
+	clients    ontap.Clients
 	seedClient client.Client
 }
 
@@ -73,57 +71,12 @@ func NewSvmManager(log logr.Logger, clients []*ontap.Client, seedClient client.C
 	}
 }
 
-// getWriteClient dynamically selects the client with the fewest total volumes.
-func (m *SvmManager) getWriteClient(ctx context.Context) (*ontapv1.Ontap, error) {
-	var (
-		bestClient      *ontapv1.Ontap
-		bestClientIndex       = -1
-		minVolumes      int64 = math.MaxInt64
-	)
-
-	for i, c := range m.clients {
-		params := storage.NewAggregateCollectionGetParamsWithContext(ctx)
-		params.Fields = []string{"volume-count"}
-
-		result, err := c.Storage.AggregateCollectionGet(params, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get aggregate volume counts: %w", err)
-		}
-
-		var volumeCount int64
-		var nilCount int
-		for _, aggr := range result.Payload.AggregateResponseInlineRecords {
-			if aggr.VolumeCount == nil {
-				nilCount++
-				m.log.Info("aggregate with nil volume_count", "client_index", i, "aggregate", aggr.Name, "uuid", aggr.UUID)
-				continue
-			}
-			m.log.Info("aggregate volume_count", "client_index", i, "aggregate", aggr.Name, "volume_count", *aggr.VolumeCount)
-			volumeCount += *aggr.VolumeCount
-		}
-		m.log.Info("client total volume count", "client_index", i, "volume_count", volumeCount, "aggregates", len(result.Payload.AggregateResponseInlineRecords), "nil_volume_counts", nilCount)
-
-		if volumeCount < minVolumes {
-			minVolumes = volumeCount
-			bestClient = c
-			bestClientIndex = i
-		}
-	}
-
-	if bestClient == nil {
-		return nil, fmt.Errorf("no suitable write client found")
-	}
-
-	m.log.Info("selected write client", "client_index", bestClientIndex, "volume_count", minVolumes)
-	return bestClient, nil
-}
-
 // CreateSVM creates an SVM and sets up network interfaces on a selected node
 func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error {
 	m.log.Info("Creating SVM with IPs", "name", opts.ProjectID, "managementLif", opts.SvmIpaddresses.ManagementLif, "dataLifs", opts.SvmIpaddresses.DataLifs)
 
 	// 0. Dynamically select the write target based on volume counts
-	writeClient, err := m.getWriteClient(ctx)
+	writeClient, err := m.clients.WriteClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to select write client: %w", err)
 	}
@@ -233,7 +186,7 @@ func (m *SvmManager) CreateSVM(ctx context.Context, opts CreateSVMOptions) error
 
 // getAllNodesInCluster fetches the first node name found in the ONTAP cluster
 // Needs to be changed, waiting for Netapp answer
-func (m *SvmManager) getAllNodesInCluster(ctx context.Context, ontapClient *ontapv1.Ontap) ([]string, error) {
+func (m *SvmManager) getAllNodesInCluster(ctx context.Context, ontapClient *ontap.Client) ([]string, error) {
 	m.log.Info("Fetching first available node in cluster...")
 
 	var nodeUUIDs []string
@@ -264,7 +217,7 @@ func (m *SvmManager) getAllNodesInCluster(ctx context.Context, ontapClient *onta
 }
 
 // createNetworkInterfaceForSvm creates a network interface for the given SVM
-func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, ontapClient *ontapv1.Ontap, opts networkInterfaceOptions) error {
+func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, ontapClient *ontap.Client, opts networkInterfaceOptions) error {
 
 	m.log.Info("Creating network interface", "svm", opts.svmName, "lifName", opts.lifName, "ip", opts.ipAddress, "node", opts.nodeUUID)
 
@@ -330,7 +283,7 @@ func (m *SvmManager) createNetworkInterfaceForSvm(ctx context.Context, ontapClie
 
 // validateAndEnsureAggregates ensures the SVM has all available cluster aggregates assigned.
 // When new aggregates are added to the cluster, this will update the SVM to include them.
-func (m *SvmManager) validateAndEnsureAggregates(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID, svmName string) error {
+func (m *SvmManager) validateAndEnsureAggregates(ctx context.Context, ontapClient *ontap.Client, svmUUID, svmName string) error {
 	// Get all aggregates available on the cluster
 	aggrParams := storage.NewAggregateCollectionGetParamsWithContext(ctx)
 	aggrResult, err := ontapClient.Storage.AggregateCollectionGet(aggrParams, nil)
@@ -450,7 +403,7 @@ func (m *SvmManager) validateAndEnsureCompleteSVMState(ctx context.Context, acti
 }
 
 // validateSVMRunningState checks if SVM is in running state with NVMe enabled
-func (m *SvmManager) validateSVMRunningState(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID, svmName string) error {
+func (m *SvmManager) validateSVMRunningState(ctx context.Context, ontapClient *ontap.Client, svmUUID, svmName string) error {
 	getParams := s_vm.NewSvmGetParamsWithContext(ctx)
 	getParams.SetUUID(svmUUID)
 
@@ -472,7 +425,7 @@ func (m *SvmManager) validateSVMRunningState(ctx context.Context, ontapClient *o
 }
 
 // getExistingNetworkInterfaces gets all network interfaces for an SVM
-func (m *SvmManager) getExistingNetworkInterfaces(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID string) (map[string]string, error) {
+func (m *SvmManager) getExistingNetworkInterfaces(ctx context.Context, ontapClient *ontap.Client, svmUUID string) (map[string]string, error) {
 	params := networking.NewNetworkIPInterfacesGetParamsWithContext(ctx)
 	params.SetSvmUUID(&svmUUID)
 	fields := []string{"name", "ip.address"}
@@ -496,7 +449,7 @@ func (m *SvmManager) getExistingNetworkInterfaces(ctx context.Context, ontapClie
 }
 
 // validateAndEnsureDataLIFs validates all expected data LIFs exist and creates missing ones
-func (m *SvmManager) validateAndEnsureDataLIFs(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID, svmName string, expectedDataLifs []string, nodesUUIDs []string) error {
+func (m *SvmManager) validateAndEnsureDataLIFs(ctx context.Context, ontapClient *ontap.Client, svmUUID, svmName string, expectedDataLifs []string, nodesUUIDs []string) error {
 	existingInterfaces, err := m.getExistingNetworkInterfaces(ctx, ontapClient, svmUUID)
 	if err != nil {
 		return err
@@ -535,7 +488,7 @@ func (m *SvmManager) validateAndEnsureDataLIFs(ctx context.Context, ontapClient 
 }
 
 // validateAndEnsureManagementLIF validates management LIF exists and creates if missing
-func (m *SvmManager) validateAndEnsureManagementLIF(ctx context.Context, ontapClient *ontapv1.Ontap, svmUUID, svmName, managementIP, nodeUUID string) error {
+func (m *SvmManager) validateAndEnsureManagementLIF(ctx context.Context, ontapClient *ontap.Client, svmUUID, svmName, managementIP, nodeUUID string) error {
 	existingInterfaces, err := m.getExistingNetworkInterfaces(ctx, ontapClient, svmUUID)
 	if err != nil {
 		return err

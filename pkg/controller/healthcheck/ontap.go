@@ -37,15 +37,16 @@ func (h *ontapHealthChecker) Check(ctx context.Context, _ types.NamespacedName) 
 	checkCtx, cancel := context.WithTimeout(ctx, ontapHealthCheckTimeout)
 	defer cancel()
 
-	clients, err := ontap.NewClients(h.config)
+	clients, err := ontap.NewClients(h.logger, h.config)
 	if err != nil {
+		h.logger.Error(err, "ONTAP health check failed")
 		return &healthcheck.SingleCheckResult{
 			Status: gardencorev1beta1.ConditionFalse,
 			Detail: err.Error(),
 		}, nil
 	}
 
-	if err := ontap.CheckConnectivity(checkCtx, clients); err != nil {
+	if err := clients.CheckConnectivity(checkCtx); err != nil {
 		h.logger.Error(err, "ONTAP health check failed")
 		return &healthcheck.SingleCheckResult{
 			Status: gardencorev1beta1.ConditionFalse,

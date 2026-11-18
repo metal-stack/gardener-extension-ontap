@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/go-logr/logr"
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	ontapgoclient "github.com/metal-stack/ontap-go/pkg/client"
@@ -12,12 +13,15 @@ import (
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 )
 
+type Clients []*Client
+
 type Client struct {
 	*ontapv1.Ontap
 	clusterName string
+	log         logr.Logger
 }
 
-func NewClients(config config.ControllerConfiguration) ([]*Client, error) {
+func NewClients(log logr.Logger, config config.ControllerConfiguration) (Clients, error) {
 	var clients = make([]*Client, 0, len(config.Clusters))
 
 	for _, cluster := range config.Clusters {
@@ -38,16 +42,17 @@ func NewClients(config config.ControllerConfiguration) ([]*Client, error) {
 		clients = append(clients, &Client{
 			Ontap:       c,
 			clusterName: cluster.Name,
+			log:         log.WithValues("cluster-name", cluster.Name),
 		})
 	}
 
 	return clients, nil
 }
 
-func CheckConnectivity(ctx context.Context, clients []*Client) error {
+func (cs Clients) CheckConnectivity(ctx context.Context) error {
 	var errs []error
 
-	for _, client := range clients {
+	for _, client := range cs {
 		result, err := client.Cluster.ClusterGet(cluster.NewClusterGetParamsWithContext(ctx), nil)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed to connect to ontap cluster %q: %w", client.clusterName, err))

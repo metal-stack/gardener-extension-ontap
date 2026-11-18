@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/go-logr/logr"
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/cluster"
 	"github.com/metal-stack/ontap-go/api/models"
@@ -15,19 +16,13 @@ import (
 )
 
 func TestNewClients(t *testing.T) {
-	clients, err := NewClients(config.ControllerConfiguration{Clusters: []config.Cluster{
+	clients, err := NewClients(logr.Discard(), config.ControllerConfiguration{Clusters: []config.Cluster{
 		{Name: "cluster-a", IPAddress: "192.168.10.11", Username: "admin", Password: "password-a"},
 		{Name: "cluster-b", IPAddress: "192.168.10.12", Username: "admin", Password: "password-b"},
 	}})
 
 	require.NoError(t, err)
 	require.Len(t, clients, 2)
-}
-
-func TestNewClientsWithoutClusters(t *testing.T) {
-	_, err := NewClients(config.ControllerConfiguration{})
-
-	require.Error(t, err)
 }
 
 func TestCheckClients(t *testing.T) {
@@ -57,7 +52,7 @@ func TestCheckClients(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			controllerConfig := config.ControllerConfiguration{}
-			var clients []*ontapv1.Ontap
+			var clients Clients
 
 			for i, healthy := range tt.healthy {
 				name := fmt.Sprintf("cluster-%c", 'a'+i)
@@ -76,10 +71,10 @@ func TestCheckClients(t *testing.T) {
 						Return(nil, fmt.Errorf("connection refused"))
 				}
 
-				clients = append(clients, &ontapv1.Ontap{Cluster: service})
+				clients = append(clients, &Client{Ontap: &ontapv1.Ontap{Cluster: service}, clusterName: name})
 			}
 
-			err := CheckConnectivity(t.Context(), clients)
+			err := clients.CheckConnectivity(t.Context())
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 				return

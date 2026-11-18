@@ -1,11 +1,9 @@
 package trident
 
 import (
-	"context"
 	"testing"
 
 	"github.com/go-logr/logr"
-	ontapv1 "github.com/metal-stack/ontap-go/api/client"
 	"github.com/metal-stack/ontap-go/api/client/security"
 	"github.com/metal-stack/ontap-go/api/models"
 	"github.com/stretchr/testify/mock"
@@ -13,10 +11,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/metal-stack/gardener-extension-ontap/pkg/ontap"
 )
 
 func TestValidateAndEnsureCompleteUserState(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
@@ -42,7 +42,7 @@ func TestValidateAndEnsureCompleteUserState(t *testing.T) {
 		}
 		k8s := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingSecret).Build()
 
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc.client}, k8s)
+		m := NewSvmManager(logr.Discard(), []*ontap.Client{mc.client}, k8s)
 		err := m.validateAndEnsureCompleteUserState(ctx, mc.client, userAndSecretOptions{
 			projectID:              "proj-1",
 			shootNamespace:         "shoot--proj--myshoot",
@@ -69,7 +69,7 @@ func TestValidateAndEnsureCompleteUserState(t *testing.T) {
 		// No pre-existing K8s secret
 		k8s := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-		m := NewSvmManager(logr.Discard(), []*ontapv1.Ontap{mc.client}, k8s)
+		m := NewSvmManager(logr.Discard(), []*ontap.Client{mc.client}, k8s)
 		err := m.validateAndEnsureCompleteUserState(ctx, mc.client, userAndSecretOptions{
 			projectID:              "proj-1",
 			shootNamespace:         "shoot--proj--myshoot",

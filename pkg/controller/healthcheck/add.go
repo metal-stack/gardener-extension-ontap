@@ -2,6 +2,7 @@ package healthcheck
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	healthcheckconfig "github.com/gardener/gardener/extensions/pkg/apis/config/v1alpha1"
@@ -32,6 +33,10 @@ type AddOptions struct {
 }
 
 func RegisterHealthChecks(_ context.Context, mgr manager.Manager, opts AddOptions) error {
+	if err := opts.ControllerConfig.Validate(); err != nil {
+		return fmt.Errorf("invalid controller configuration: %w", err)
+	}
+
 	return healthcheck.DefaultRegistration(
 		ontapcontroller.ExtensionType,
 		extensionsv1alpha1.SchemeGroupVersion.WithKind(extensionsv1alpha1.ExtensionResource),
