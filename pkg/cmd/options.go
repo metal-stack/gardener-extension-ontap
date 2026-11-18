@@ -2,10 +2,12 @@ package cmd
 
 import (
 	controllercmd "github.com/gardener/gardener/extensions/pkg/controller/cmd"
+	extensionshealthcheckcontroller "github.com/gardener/gardener/extensions/pkg/controller/healthcheck"
 	extensionsheartbeatcontroller "github.com/gardener/gardener/extensions/pkg/controller/heartbeat"
 	webhookcmd "github.com/gardener/gardener/extensions/pkg/webhook/cmd"
 	extensionshootwebhook "github.com/gardener/gardener/extensions/pkg/webhook/shoot"
 
+	ontaphealthcheck "github.com/metal-stack/gardener-extension-ontap/pkg/controller/healthcheck"
 	ontap "github.com/metal-stack/gardener-extension-ontap/pkg/controller/ontap"
 	shootwebhook "github.com/metal-stack/gardener-extension-ontap/pkg/webhook/shoot"
 )
@@ -14,6 +16,7 @@ import (
 func ControllerSwitchOptions() *controllercmd.SwitchOptions {
 	return controllercmd.NewSwitchOptions(
 		controllercmd.Switch(ontap.ControllerName, ontap.AddToManager),
+		controllercmd.Switch(extensionshealthcheckcontroller.ControllerName, ontaphealthcheck.AddToManager),
 		controllercmd.Switch(extensionsheartbeatcontroller.ControllerName, extensionsheartbeatcontroller.AddToManager),
 	)
 }

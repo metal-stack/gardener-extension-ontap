@@ -17,18 +17,16 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
+	ontapclient "github.com/metal-stack/gardener-extension-ontap/pkg/ontap"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/trident"
 	"github.com/metal-stack/metal-lib/pkg/tag"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	runtimelog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	ontapv1 "github.com/metal-stack/ontap-go/api/client"
-	"github.com/metal-stack/ontap-go/api/client/cluster"
-	ontapclient "github.com/metal-stack/ontap-go/pkg/client"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -36,7 +34,6 @@ import (
 // FIXME here the logic to deploy the trident operator
 
 type actuator struct {
-	clients            []*ontapv1.Ontap
 	client             client.Client
 	decoder            runtime.Decoder
 	config             config.ControllerConfiguration
@@ -46,81 +43,17 @@ type actuator struct {
 const ShootWebhooksResourceName = "extension-ontap-shoot"
 
 // NewActuator returns an actuator responsible for Extension resources.
-func NewActuator(ctx context.Context, mgr manager.Manager, config config.ControllerConfiguration, shootWebhookConfig *atomic.Value) (extension.Actuator, error) {
-	clients, err := createAdminClient(ctx, config)
-	if err != nil {
-		return nil, err
+func NewActuator(mgr manager.Manager, config config.ControllerConfiguration, shootWebhookConfig *atomic.Value) (extension.Actuator, error) {
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid controller configuration: %w", err)
 	}
 
 	return &actuator{
-		clients:            clients,
 		client:             mgr.GetClient(),
 		decoder:            serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
 		config:             config,
 		shootWebhookConfig: shootWebhookConfig,
 	}, nil
-}
-
-func createAdminClient(ctx context.Context, config config.ControllerConfiguration) ([]*ontapv1.Ontap, error) {
-	err := config.Validate()
-	if err != nil {
-		return nil, err
-	}
-
-	var (
-		log          = runtimelog.Log.WithName(ControllerName)
-		ontapConfigs []ontapclient.Config
-	)
-
-	for _, cluster := range config.Clusters {
-		clusterClientConfig := ontapclient.Config{
-			BasicAuth: &ontapclient.BasicAuthConfig{
-				User:     cluster.Username,
-				Password: cluster.Password,
-			},
-			TLS: &ontapclient.TLSConfig{
-				InsecureTLS: new(true),
-			},
-			ApiURL: fmt.Sprintf("https://%s/api", cluster.IPAddress),
-		}
-
-		log.Info("adding cluster config", "cluster", cluster.Name, "user", cluster.Username, "ip", cluster.IPAddress)
-
-		ontapConfigs = append(ontapConfigs, clusterClientConfig)
-	}
-
-	metroClusterClient, err := ontapclient.NewMetroClusterClient(ontapConfigs)
-	if err != nil {
-		return nil, err
-	}
-
-	if metroClusterClient == nil || len(*metroClusterClient) == 0 {
-		return nil, fmt.Errorf("couldn't initialize any ONTAP clients")
-	}
-
-	mcClients := *metroClusterClient
-	var clients []*ontapv1.Ontap
-
-	for i := range mcClients {
-		client := &mcClients[i]
-
-		cgparams := cluster.NewClusterGetParamsWithContext(ctx)
-		cgok, err := client.Cluster.ClusterGet(cgparams, nil)
-		if err != nil {
-			return nil, err
-		}
-		clusterResponse := cgok.Payload
-
-		log.Info("Successfully connected to ONTAP cluster", "cluster", *clusterResponse.Name, "statistics", *clusterResponse.Statistics)
-
-		clients = append(clients, client)
-	}
-
-	if len(clients) == 0 {
-		return nil, fmt.Errorf("couldn't initialize any ONTAP clients")
-	}
-
-	return clients, nil
 }
 
 // Reconcile handles extension creation and updates.
@@ -171,7 +104,11 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	svmSeedSecretNamespace := "kube-system"
 
 	log.Info("Using project ID for SVM creation", "projectId", projectId, "shootNamespace", shootNamespace, "namespace", svmSeedSecretNamespace, "managementLifIp", ontapConfig.SvmIpaddresses.ManagementLif, "dataLifIps", ontapConfig.SvmIpaddresses.DataLifs)
-	if err := a.ensureSvmForProject(ctx, log, ontapConfig.SvmIpaddresses, projectId, shootNamespace, svmSeedSecretNamespace); err != nil {
+	clients, err := ontapclient.NewConnected(ctx, log, a.config)
+	if err != nil {
+		return fmt.Errorf("failed to create ONTAP clients: %w", err)
+	}
+	if err := a.ensureSvmForProject(ctx, log, clients, ontapConfig.SvmIpaddresses, projectId, shootNamespace, svmSeedSecretNamespace); err != nil {
 		return err
 	}
 
@@ -247,8 +184,8 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 // ensureSvmForProject ensures a complete SVM exists with all required components
-func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, shootNamespace string, svmSeedSecretNamespace string) error {
-	svmManager := trident.NewSvmManager(log, a.clients, a.client)
+func (a *actuator) ensureSvmForProject(ctx context.Context, log logr.Logger, clients []*ontapv1.Ontap, SvmIpaddresses ontapv1alpha1.SvmIpaddresses, projectId string, shootNamespace string, svmSeedSecretNamespace string) error {
+	svmManager := trident.NewSvmManager(log, clients, a.client)
 
 	svmOpts := trident.CreateSVMOptions{
 		ProjectID:              projectId,

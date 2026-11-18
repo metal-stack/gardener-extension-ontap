@@ -13,6 +13,7 @@ import (
 	heartbeatcontroller "github.com/gardener/gardener/extensions/pkg/controller/heartbeat"
 	heartbeatcmd "github.com/gardener/gardener/extensions/pkg/controller/heartbeat/cmd"
 	ontapcmd "github.com/metal-stack/gardener-extension-ontap/pkg/cmd"
+	healthcheckcontroller "github.com/metal-stack/gardener-extension-ontap/pkg/controller/healthcheck"
 	controller "github.com/metal-stack/gardener-extension-ontap/pkg/controller/ontap"
 
 	controllercmd "github.com/gardener/gardener/extensions/pkg/controller/cmd"
@@ -149,11 +150,15 @@ func (options *Options) run(ctx context.Context) error {
 
 	ctrlConfig := options.ontapOptions.Completed()
 	ctrlConfig.Apply(&controller.DefaultAddOptions.Config)
+	ctrlConfig.Apply(&healthcheckcontroller.DefaultAddOptions.ControllerConfig)
 
 	options.controllerOptions.Completed().Apply(&controller.DefaultAddOptions.ControllerOptions)
 	options.reconcileOptions.Completed().Apply(&controller.DefaultAddOptions.IgnoreOperationAnnotation)
 	controller.DefaultAddOptions.ExtensionClasses = options.generalOptions.Completed().ExtensionClasses
+	healthcheckcontroller.DefaultAddOptions.HealthCheckDefaults.ExtensionClasses = options.generalOptions.Completed().ExtensionClasses
 	options.heartbeatOptions.Completed().Apply(&heartbeatcontroller.DefaultAddOptions)
+	options.healthOptions.Completed().Apply(&healthcheckcontroller.DefaultAddOptions.HealthCheckDefaults.Controller)
+	ctrlConfig.ApplyHealthCheckConfig(&healthcheckcontroller.DefaultAddOptions.HealthCheckDefaults.HealthCheckConfig)
 
 	atomicShootWebhookConfig, err := options.webhookOptions.Completed().AddToManager(ctx, mgr, nil)
 	if err != nil {
