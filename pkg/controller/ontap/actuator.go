@@ -13,7 +13,6 @@ import (
 	"github.com/gardener/gardener/extensions/pkg/webhook/shoot"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 
-	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
@@ -142,21 +141,16 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return fmt.Errorf("invalid trident config: %w", err)
 	}
 
-	cluster := &extensionsv1alpha1.Cluster{}
-	if err := a.client.Get(ctx, client.ObjectKey{Name: ex.Namespace}, cluster); err != nil {
+	cluster, err := extensionscontroller.GetCluster(ctx, a.client, ex.Namespace)
+	if err != nil {
 		return fmt.Errorf("failed to get cluster object: %w", err)
 	}
-	if cluster.Spec.Shoot.Raw == nil {
+	if cluster.Shoot == nil {
 		return fmt.Errorf("cluster.spec.shoot.raw is nil")
 	}
 
-	shoot := &gardencorev1beta1.Shoot{}
-	if _, _, err := a.decoder.Decode(cluster.Spec.Shoot.Raw, nil, shoot); err != nil {
-		log.Error(err, "failed to decode shoot, continuing with partial shoot object")
-	}
-
-	log.Info("Shoot annotations", "annotations", shoot.Annotations)
-	var projectTag tag.TagMap = shoot.Annotations
+	log.Info("Shoot annotations", "annotations", cluster.Shoot.Annotations)
+	var projectTag tag.TagMap = cluster.Shoot.Annotations
 	projectId, ok := projectTag.Value(tag.ClusterProject)
 	if !ok || projectId == "" {
 		return fmt.Errorf("no project ID found in shoot annotations")
@@ -212,13 +206,7 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return err
 	}
 
-	clusterd, err := extensionscontroller.GetCluster(ctx, a.client, ex.Namespace)
-	if client.IgnoreNotFound(err) != nil {
-		return err
-	}
-
-	err = a.reconcileShootWebhookConfig(ctx, clusterd)
-	if err != nil {
+	if err := a.reconcileShootWebhookConfig(ctx, cluster); err != nil {
 		return err
 	}
 
