@@ -1,9 +1,6 @@
 package config
 
 import (
-	"fmt"
-	"net/netip"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	healthcheckconfig "github.com/gardener/gardener/extensions/pkg/apis/config/v1alpha1"
@@ -31,22 +28,4 @@ type Cluster struct {
 	Username string
 	// Password is the admin password to access the cluster management ip for cluster A
 	Password string
-}
-
-func (c *ControllerConfiguration) Validate() error {
-	if len(c.Clusters) == 0 {
-		return fmt.Errorf("controller config of clusters is empty")
-	}
-
-	for _, cluster := range c.Clusters {
-		if cluster.Username == "" || cluster.Password == "" {
-			return fmt.Errorf("missing fields in config: cluster: %s", cluster.Name)
-		}
-
-		if _, err := netip.ParseAddr(cluster.IPAddress); err != nil {
-			return fmt.Errorf("given ipaddress of cluster:%s is malformed %w", cluster.Name, err)
-		}
-	}
-
-	return nil
 }

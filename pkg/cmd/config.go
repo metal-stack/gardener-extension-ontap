@@ -7,6 +7,7 @@ import (
 	healthcheckconfig "github.com/gardener/gardener/extensions/pkg/apis/config/v1alpha1"
 	configapi "github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config/v1alpha1"
+	configvalidation "github.com/metal-stack/gardener-extension-ontap/pkg/apis/config/validation"
 
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -27,19 +28,19 @@ func init() {
 	decoder = serializer.NewCodecFactory(scheme).UniversalDecoder()
 }
 
-// RegistryOptions holds options related to the registry service.
-type AuthOptions struct {
+// ControllerConfigurationOptions holds options for the ONTAP controller configuration.
+type ControllerConfigurationOptions struct {
 	ConfigLocation string
-	config         *AuthServiceConfig
+	config         *ControllerConfigurationConfig
 }
 
 // AddFlags implements Flagger.AddFlags.
-func (o *AuthOptions) AddFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&o.ConfigLocation, "config", "", "Path to registry service configuration")
+func (o *ControllerConfigurationOptions) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&o.ConfigLocation, "config", "", "Path to the ONTAP controller configuration")
 }
 
 // Complete implements Completer.Complete.
-func (o *AuthOptions) Complete() error {
+func (o *ControllerConfigurationOptions) Complete() error {
 	if o.ConfigLocation == "" {
 		return errors.New("config location is not set")
 	}
@@ -54,34 +55,34 @@ func (o *AuthOptions) Complete() error {
 		return err
 	}
 
-	// if errs := validation.ValidateConfiguration(&config); len(errs) > 0 {
-	// 	return errs.ToAggregate()
-	// }
+	if errs := configvalidation.ValidateControllerConfiguration(&config); len(errs) > 0 {
+		return errs.ToAggregate()
+	}
 
-	o.config = &AuthServiceConfig{
+	o.config = &ControllerConfigurationConfig{
 		config: config,
 	}
 
 	return nil
 }
 
-// Completed returns the decoded RegistryServiceConfiguration instance. Only call this if `Complete` was successful.
-func (o *AuthOptions) Completed() *AuthServiceConfig {
+// Completed returns the decoded controller configuration. Only call this if Complete was successful.
+func (o *ControllerConfigurationOptions) Completed() *ControllerConfigurationConfig {
 	return o.config
 }
 
-// RegistryServiceConfig contains configuration information about the registry service.
-type AuthServiceConfig struct {
+// ControllerConfigurationConfig contains the controller configuration.
+type ControllerConfigurationConfig struct {
 	config configapi.ControllerConfiguration
 }
 
-// Apply applies the RegistryOptions to the passed ControllerOptions instance.
-func (c *AuthServiceConfig) Apply(config *configapi.ControllerConfiguration) {
+// Apply applies the configuration to the passed ControllerConfiguration instance.
+func (c *ControllerConfigurationConfig) Apply(config *configapi.ControllerConfiguration) {
 	*config = c.config
 }
 
 // ApplyHealthCheckConfig applies the HealthCheckConfig.
-func (c *AuthServiceConfig) ApplyHealthCheckConfig(config *healthcheckconfig.HealthCheckConfig) {
+func (c *ControllerConfigurationConfig) ApplyHealthCheckConfig(config *healthcheckconfig.HealthCheckConfig) {
 	if c.config.HealthCheckConfig != nil {
 		*config = *c.config.HealthCheckConfig
 	}

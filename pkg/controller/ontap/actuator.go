@@ -17,6 +17,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/apis/config"
 	ontapv1alpha1 "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/v1alpha1"
+	ontapvalidation "github.com/metal-stack/gardener-extension-ontap/pkg/apis/ontap/validation"
 	"github.com/metal-stack/gardener-extension-ontap/pkg/trident"
 	"github.com/metal-stack/metal-lib/pkg/tag"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -62,11 +63,6 @@ func NewActuator(ctx context.Context, mgr manager.Manager, config config.Control
 }
 
 func createAdminClient(ctx context.Context, config config.ControllerConfiguration) ([]*ontapv1.Ontap, error) {
-	err := config.Validate()
-	if err != nil {
-		return nil, err
-	}
-
 	var (
 		log          = runtimelog.Log.WithName(ControllerName)
 		ontapConfigs []ontapclient.Config
@@ -136,10 +132,8 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		return fmt.Errorf("failed to decode provider config: %w", err)
 	}
 
-	log.Info("raw provideconfig", "tridentconfig", string(ex.Spec.ProviderConfig.Raw))
-
-	if err := ontapConfig.Validate(); err != nil {
-		return fmt.Errorf("invalid trident config: %w", err)
+	if errs := ontapvalidation.ValidateTridentConfig(ontapConfig); len(errs) > 0 {
+		return fmt.Errorf("invalid trident config: %w", errs.ToAggregate())
 	}
 
 	cluster := &extensionsv1alpha1.Cluster{}

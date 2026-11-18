@@ -31,25 +31,25 @@ import (
 const ExtensionName = "extension-ontap"
 
 type Options struct {
-	generalOptions     *controllercmd.GeneralOptions
-	ontapOptions       *ontapcmd.AuthOptions
-	restOptions        *controllercmd.RESTOptions
-	managerOptions     *controllercmd.ManagerOptions
-	controllerOptions  *controllercmd.ControllerOptions
-	heartbeatOptions   *heartbeatcmd.Options
-	healthOptions      *controllercmd.ControllerOptions
-	controllerSwitches *controllercmd.SwitchOptions
-	reconcileOptions   *controllercmd.ReconcilerOptions
-	webhookOptions     *webhookcmd.AddToManagerOptions
-	optionAggregator   controllercmd.OptionAggregator
+	generalOptions                 *controllercmd.GeneralOptions
+	controllerConfigurationOptions *ontapcmd.ControllerConfigurationOptions
+	restOptions                    *controllercmd.RESTOptions
+	managerOptions                 *controllercmd.ManagerOptions
+	controllerOptions              *controllercmd.ControllerOptions
+	heartbeatOptions               *heartbeatcmd.Options
+	healthOptions                  *controllercmd.ControllerOptions
+	controllerSwitches             *controllercmd.SwitchOptions
+	reconcileOptions               *controllercmd.ReconcilerOptions
+	webhookOptions                 *webhookcmd.AddToManagerOptions
+	optionAggregator               controllercmd.OptionAggregator
 }
 
 func NewOptions() *Options {
 	generalOptions := &controllercmd.GeneralOptions{}
 	options := &Options{
-		generalOptions: generalOptions,
-		ontapOptions:   &ontapcmd.AuthOptions{},
-		restOptions:    &controllercmd.RESTOptions{},
+		generalOptions:                 generalOptions,
+		controllerConfigurationOptions: &ontapcmd.ControllerConfigurationOptions{},
+		restOptions:                    &controllercmd.RESTOptions{},
 		managerOptions: &controllercmd.ManagerOptions{
 			LeaderElection:          true,
 			LeaderElectionID:        controllercmd.LeaderElectionNameID(ExtensionName),
@@ -58,7 +58,7 @@ func NewOptions() *Options {
 			HealthBindAddress:       ":8081",
 		},
 
-		// options for the controlplane controller
+		// options for the extension controller
 		controllerOptions: &controllercmd.ControllerOptions{
 			MaxConcurrentReconciles: 5,
 		},
@@ -74,7 +74,6 @@ func NewOptions() *Options {
 			MaxConcurrentReconciles: 5,
 		},
 
-		//Throws Panic
 		controllerSwitches: ontapcmd.ControllerSwitchOptions(),
 		reconcileOptions:   &controllercmd.ReconcilerOptions{IgnoreOperationAnnotation: true},
 
@@ -92,7 +91,7 @@ func NewOptions() *Options {
 
 	options.optionAggregator = controllercmd.NewOptionAggregator(
 		options.generalOptions,
-		options.ontapOptions,
+		options.controllerConfigurationOptions,
 		options.restOptions,
 		options.managerOptions,
 		options.controllerOptions,
@@ -147,7 +146,7 @@ func (options *Options) run(ctx context.Context) error {
 	}
 	log.Info("added mgr-scheme to installation")
 
-	ctrlConfig := options.ontapOptions.Completed()
+	ctrlConfig := options.controllerConfigurationOptions.Completed()
 	ctrlConfig.Apply(&controller.DefaultAddOptions.Config)
 
 	options.controllerOptions.Completed().Apply(&controller.DefaultAddOptions.ControllerOptions)
